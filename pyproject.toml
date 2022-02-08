@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "kapla-cli-v2"
+version = "0.1.0"
+description = ""
+authors = ["charbonnierg <guillaume.charbonnier@araymond.com>"]
+readme = "README.md"
+packages = [{include = "kapla"}]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+graphlib-backport = "^1.0.3"
+pydantic = "^1.9.0"
+toml = "^0.10.2"
+PyYAML = "^6.0"
+anyio = "^3.5.0"
+
+[tool.poetry.scripts]
+k = "kapla.cli.__main__:main"
+
+[build-system]
+requires = ["poetry-core @ git+https://github.com/python-poetry/poetry-core.git@master"]
+build-backend = "poetry.core.masonry.api"

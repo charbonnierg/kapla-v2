@@ -1,0 +1,14 @@
+name: demo-app2
+version: 0.1.0
+description: ""
+authors:
+  - charbonnierg <guillaume.charbonnier@araymond.com>
+readme: README.md
+packages:
+  - include: demo/
+    from: src/
+
+dependencies:
+  - demo-lib
+  - demo-plugin
+  - numpy

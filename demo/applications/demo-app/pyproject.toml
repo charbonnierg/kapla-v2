@@ -1,0 +1,34 @@
+[build-system]
+requires = [ "poetry-core @ git+https://github.com/python-poetry/poetry-core.git@master",]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "demo-app"
+version = "0.1.0"
+description = ""
+authors = [ "charbonnierg <guillaume.charbonnier@araymond.com>",]
+maintainers = []
+readme = "README.md"
+keywords = []
+classifiers = []
+include = []
+exclude = []
+[[tool.poetry.packages]]
+include = "demo/"
+from = "src/"
+
+[tool.poetry.dependencies]
+python = ">=3.8"
+demo-lib = "0.1.0"
+demo-plugin = "0.1.0"
+numpy = "1.22.2"
+
+[tool.poetry.dev-dependencies]
+
+[tool.poetry.scripts]
+
+[tool.poetry.extras]
+
+[tool.poetry.plugins]
+
+[tool.poetry.urls]
