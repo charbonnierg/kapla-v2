@@ -1,22 +1,38 @@
+# Poetry pyrpoject.toml configuration file
+#
+# This file is used to declare kapla-cli python package
+#
+# Reference: https://python-poetry.org/docs/pyproject/
+
 [tool.poetry]
 name = "kapla-cli-v2"
 version = "0.1.0"
 description = ""
 authors = ["charbonnierg <guillaume.charbonnier@araymond.com>"]
 readme = "README.md"
-packages = [{include = "kapla"}]
+packages = [{ include = "kapla" }]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-graphlib-backport = "^1.0.3"
+graphlib-backport = { version = "^1.0.3", python = "<3.9" }
 pydantic = "^1.9.0"
-toml = "^0.10.2"
-PyYAML = "^6.0"
 anyio = "^3.5.0"
+"ruamel.yaml" = "^0.17.20"
+tomlkit = "^0.9.2"
+rich = "^11.2.0"
+
+[tool.poetry.group.dev.dependencies]
+mypy = "^0.931"
+isort = "^5.10.1"
+flake8 = "^4.0.1"
+black = "^22.1.0"
+types-toml = "^0.10.3"
 
 [tool.poetry.scripts]
-k = "kapla.cli.__main__:main"
+k = "kapla.cli:app"
 
 [build-system]
-requires = ["poetry-core @ git+https://github.com/python-poetry/poetry-core.git@master"]
+requires = [
+    "poetry-core @ git+https://github.com/python-poetry/poetry-core.git@master",
+]
 build-backend = "poetry.core.masonry.api"
