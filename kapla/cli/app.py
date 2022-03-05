@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 
+from kapla.cli.licenses import do_show_licenses, set_licenses_parser
+from kapla.cli.list import do_list_projects, set_list_parser
+
 from .build import do_build, set_build_parser
 from .install import do_install, set_install_parser
 from .project import (
@@ -25,6 +28,8 @@ set_run_parser(command_subparser, parent=parent_parser)
 set_venv_parser(command_subparser, parent=parent_parser)
 set_build_parser(command_subparser, parent=parent_parser)
 set_project_parser(command_subparser, parent=parent_parser)
+set_list_parser(command_subparser, parent=parent_parser)
+set_licenses_parser(command_subparser, parent=parent_parser)
 
 
 def app() -> None:
@@ -36,6 +41,12 @@ def app() -> None:
 
     elif args.command == "build":
         do_build(args)
+
+    elif args.command == "list":
+        do_list_projects(args)
+
+    elif args.command == "licenses":
+        do_show_licenses(args)
 
     elif args.command == "run":
         do_run_cmd(args)

@@ -38,7 +38,7 @@ class Dependency(DepedencyMeta):
 
 
 class Group(AliasedModel):
-    dependencies: Dict[str, Union[str, Dependency]] = {}
+    dependencies: Dict[str, Union[Dependency, str]] = {}
     optional: Optional[bool] = None
 
 
@@ -51,8 +51,8 @@ class PoetryConfig(BasePythonConfig):
     """
 
     # Docs: <https://python-poetry.org/docs/pyproject/#dependencies-and-dev-dependencies>
-    dependencies: Dict[str, Union[str, Dependency]]
-    dev_dependencies: Dict[str, Union[str, Dependency]] = Field(
+    dependencies: Dict[str, Union[Dependency, str]]
+    dev_dependencies: Dict[str, Union[Dependency, str]] = Field(
         {}, alias="dev-dependencies"
     )
     # Docs: <https://python-poetry.org/docs/pyproject/#extras>
@@ -83,6 +83,6 @@ class PyProjectSpec(BasePyProjectSpec):
 DEFAULT_BUILD_SYSTEM = BuildSystem(
     build_backend="poetry.core.masonry.api",
     requires=[
-        "poetry-core @ git+https://github.com/python-poetry/poetry-core.git@master",
+        "quara-poetry-core-next",
     ],
 )

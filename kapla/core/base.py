@@ -3,24 +3,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from shutil import which
-from typing import (
-    Any,
-    Dict,
-    Generic,
-    Iterator,
-    List,
-    Mapping,
-    MutableMapping,
-    Optional,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from .cmd import Command, check_command, run_command
-from .finder import find_files
+from .finder import DEFAULT_GITIGNORE, find_files
 
 SpecT = TypeVar("SpecT", bound=BaseModel)
 
@@ -66,12 +54,23 @@ class BaseProject(Generic[SpecT]):
         return self._spec
 
     @property
+    def venv_path(self) -> Path:
+        return self.root / ".venv"
+
+    @property
     def python_executable(self) -> str:
         for python_exec in find_files(
-            ("**/.venv/bin/python", "**/.venv/Scripts/python.exe"), self.root
+            pattern=("python", "python.exe"),
+            root=self.venv_path,
+            ignore=["include", "Include", "lib", "Lib", "share", "doc"],
         ):
             return python_exec.as_posix()
         raise FileNotFoundError("No virtual environment found for this project")
+
+    @property
+    def gitignore(self) -> List[str]:
+        """Constant value at the moment. We should parse project gitignore in the future"""
+        return DEFAULT_GITIGNORE
 
     def get_property(self, key: str, raw: bool = False) -> Any:
         """Get a project property value.
@@ -99,81 +98,6 @@ class BaseProject(Generic[SpecT]):
 
         # Return object
         return obj
-
-    def set_property(self, key: str, value: Any) -> None:
-        """Set a project property value"""
-        self.set_properties({key: value})
-
-    def set_properties(self, properties: Dict[str, Any]) -> None:
-        """Set a project property value"""
-        # Create a mapping to store old values until validation is performed
-        old_values: Dict[str, Any] = {}
-        # We must generate all nested keys before mutating
-        for key, value in properties.items():
-            # Make sure that values are not base models
-            if isinstance(value, BaseModel):
-                value = value.dict(exclude_none=True, exclude_unset=True, by_alias=True)
-            elif isinstance(value, list):
-                value = [
-                    item.dict(exclude_none=True, exclude_unset=True, by_alias=True)
-                    if isinstance(item, BaseModel)
-                    else item
-                    for item in value
-                ]
-            # Initialize object to mutation
-            obj: Any = None
-            # Split key using "." separator
-            tokens = key.split(".")
-            # Iterate over all tokens except last one
-            for token in tokens[:-1]:
-                if obj is None:
-                    try:
-                        obj = self._raw[token]
-                    except KeyError:
-                        if token.isdigit():
-                            self._raw[token] = list()
-                        else:
-                            self._raw[token] = dict()
-                else:
-                    if isinstance(obj, list):
-                        obj = obj[int(token)]
-                    elif isinstance(obj, Mapping):
-                        obj = obj[token]
-                    else:
-                        obj = getattr(obj, token)
-            # Update value
-            if obj:
-                if isinstance(obj, list):
-                    last_token = tokens[-1]
-                    if last_token == "$push":
-                        obj.append(value)
-                    elif last_token == "$pop":
-                        obj.remove(value)
-                    else:
-                        idx = int(tokens[-1])
-                        if idx == len(obj):
-                            obj.append(value)
-                        else:
-                            obj[idx] = value
-                elif isinstance(obj, MutableMapping):
-                    obj[tokens[-1]] = value
-                else:
-                    setattr(obj, tokens[-1], value)
-            else:
-                self._raw[key] = value
-        # Validation project spec
-        try:
-            self._spec = self.__SPEC__.parse_obj(self._raw)
-        except ValidationError:
-            # Revert value change
-            self.refresh()
-            # Raise error back
-            raise
-        else:
-            # We can discard old values
-            del old_values
-        # Write new spec
-        self.write(self.filepath)
 
     def refresh(self) -> None:
         """Refresh project specs"""

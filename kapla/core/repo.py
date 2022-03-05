@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+from collections import defaultdict
 from graphlib import TopologicalSorter
 from pathlib import Path
 from typing import (
@@ -19,13 +20,15 @@ from typing import (
 
 from anyio import create_task_group
 
-from kapla.specs.repo import RepoSpec
+from kapla.specs.pyproject import Dependency, Group
+from kapla.specs.repo import ProjectDependencies, RepoSpec
 
 from .cmd import Command, echo, get_deadline
 from .errors import KProjectNotFoundError
-from .finder import find_files, lookup_file
+from .finder import find_dirs, find_files, find_files_using_gitignore, lookup_file
 from .io import load_toml
 from .kproject import KProject
+from .logger import logger
 from .pyproject import BaseKPyProject
 
 
@@ -51,13 +54,14 @@ class BaseKRepo(BaseKPyProject, spec=RepoSpec):
 class KRepo(BaseKRepo):
     def __init__(self, filepath: Union[str, Path]) -> None:
         super().__init__(filepath)
-        self._projects = self.get_projects()
+        self._projects_ws_mapping: Dict[str, str] = {}
+        self._projects = {project.name: project for project in self.find_projects()}
         self._tree = self.get_projects_tree()
-        self._sequence = [
+        self._stack = [
             self.projects[project]
             for project in TopologicalSorter(self._tree).static_order()
         ]
-        self._async_sequence = self.get_projects_async_sequences()
+        self._async_stack = self.get_projects_async_stack()
         self._lock = self.get_packages_lock()
 
     @property
@@ -82,11 +86,11 @@ class KRepo(BaseKRepo):
 
     @property
     def projects_sequence(self) -> List[KProject]:
-        return self._sequence
+        return self._stack
 
     @property
     def projects_async_sequences(self) -> List[List[KProject]]:
-        return self._async_sequence
+        return self._async_stack
 
     @property
     def projects_names(self) -> List[str]:
@@ -102,11 +106,11 @@ class KRepo(BaseKRepo):
         super().refresh()
         self._projects = self.get_projects()
         self._tree = self.get_projects_tree()
-        self._sequence = [
+        self._stack = [
             self.projects[project]
             for project in TopologicalSorter(self._tree).static_order()
         ]
-        self._async_sequence = self.get_projects_async_sequences()
+        self._async_stack = self.get_projects_async_stack()
         self._lock = self.get_packages_lock()
 
     def find_current_project(self) -> KProject:
@@ -118,6 +122,20 @@ class KRepo(BaseKRepo):
             "Cannot find any project.yml or project.yaml file in current directory or parent directories."
         )
 
+    def filter_project(
+        self,
+        name: str,
+        include: Optional[Union[str, Iterable[str]]] = None,
+        exclude: Optional[Union[str, Iterable[str]]] = None,
+    ) -> bool:
+        if include:
+            if name not in include:
+                return False
+        if exclude:
+            if name in exclude:
+                return False
+        return True
+
     def find_projects(
         self,
         workspaces: Optional[Iterable[str]] = None,
@@ -127,17 +145,30 @@ class KRepo(BaseKRepo):
         all_workspaces = self.workspaces
         workspaces = workspaces or list(self.workspaces)
         for name in workspaces:
-            for directory in all_workspaces[name]:
-                for filepath in find_files(
-                    ("**/project.yml", "**/project.yaml"), start=self.root
+            for workspace in all_workspaces[name]:
+                for filepath in find_files_using_gitignore(
+                    ("project.yml", "project.yaml"),
+                    root=workspace,
                 ):
-                    project = KProject(filepath, repo=self)
-                    if include:
-                        if project.name not in include:
-                            continue
-                    if exclude:
-                        if project.name in exclude:
-                            continue
+                    project = KProject(filepath, repo=self, workspace=name)
+                    if self.filter_project(
+                        project.name, include=include, exclude=exclude
+                    ):
+                        yield project
+
+    def filter_projects(
+        self,
+        workspaces: Optional[Iterable[str]] = None,
+        include: Optional[Union[str, Iterable[str]]] = None,
+        exclude: Optional[Union[str, Iterable[str]]] = None,
+    ) -> Iterator[KProject]:
+        for project_name, project in self.projects.items():
+            ws = project.workspace
+            if self.filter_project(project_name, include=include, exclude=exclude):
+                if workspaces:
+                    if ws and ws in workspaces:
+                        yield project
+                else:
                     yield project
 
     def list_projects(
@@ -152,7 +183,7 @@ class KRepo(BaseKRepo):
         """
         return [
             project
-            for project in self.find_projects(
+            for project in self.filter_projects(
                 workspaces=workspaces, include=include, exclude=exclude
             )
         ]
@@ -166,16 +197,45 @@ class KRepo(BaseKRepo):
         """Get a dictionnary holding project names and projects found in monorepo"""
         return {
             project.name: project
-            for project in self.find_projects(
+            for project in self.filter_projects(
                 workspaces=workspaces, include=include, exclude=exclude
             )
         }
 
-    def get_projects_async_sequences(self) -> List[List[KProject]]:
+    def get_projects_stack(
+        self,
+        workspaces: Optional[Iterable[str]] = None,
+        include: Optional[Iterable[str]] = None,
+        exclude: Optional[Iterable[str]] = None,
+    ) -> Iterator[KProject]:
+        """Get project stack according to dependency order"""
+        must_install: Set[str] = set(include) if include else set(self.projects)
+        for project in self.filter_projects(
+            workspaces=workspaces, include=include, exclude=exclude
+        ):
+            must_install.update(project.get_local_dependencies_names())
+        # Use list to get a copy of the set and avoid mutating the same object we're iterating upon
+        for project_name in list(must_install):
+            must_install.update(
+                self.projects[project_name].get_local_dependencies_names()
+            )
+        # Use must_install to consider projects to install but still allow exclude
+        for project in self.projects_sequence:
+            if filter_project(project.name, must_install, exclude):
+                yield project
+
+    def get_projects_async_stack(
+        self,
+        workspaces: Optional[Iterable[str]] = None,
+        include: Optional[Iterable[str]] = None,
+        exclude: Optional[Iterable[str]] = None,
+    ) -> List[List[KProject]]:
         # Create an empty list of sequences
         async_sequences: List[List[KProject]] = list()
         # Iterate over projects sequence
-        for project in self.projects_sequence:
+        for project in self.get_projects_stack(
+            workspaces=workspaces, include=include, exclude=exclude
+        ):
             try:
                 current_sequence = [project.name for project in async_sequences[-1]]
             except IndexError:
@@ -188,14 +248,95 @@ class KRepo(BaseKRepo):
             # Else append to sequence
             else:
                 async_sequences[-1].append(project)
-
         return async_sequences
 
     def get_projects_tree(self) -> Dict[str, List[str]]:
         return {
-            name: project.get_repo_dependencies_names()
+            name: project.get_local_dependencies_names()
             for name, project in self.projects.items()
         }
+
+    def get_all_projects_dependencies(
+        self,
+        workspaces: Optional[Iterable[str]] = None,
+        include: Optional[Iterable[str]] = None,
+        exclude: Optional[Iterable[str]] = None,
+        editable: bool = False,
+    ) -> Dict[str, ProjectDependencies]:
+        """Get all informations related to projects dependencies"""
+        dependencies: Dict[str, ProjectDependencies] = {}
+        for project in self.get_projects_stack(
+            workspaces=workspaces, include=include, exclude=exclude
+        ):
+            if editable:
+                (
+                    project_deps,
+                    project_extras,
+                    project_groups,
+                ) = project.get_install_dependencies()
+            else:
+                (
+                    project_deps,
+                    project_extras,
+                    project_groups,
+                ) = project.get_build_dependencies()
+            repo_deps = self.get_group_dependencies(project.name)
+            project_python = project_deps.pop("python", None)
+            repo_python = repo_deps.pop("python", None)
+            repo_groups = {
+                name: group
+                for name, group in self.spec.tool.poetry.group.items()
+                if name.startswith(project.name + "--")
+            }
+            dependencies[project.name] = ProjectDependencies(
+                repo_dependencies=repo_deps,
+                repo_groups=repo_groups,
+                dependencies=project_deps,
+                groups=project_groups,
+                python=project_python or repo_python,
+            )
+        return dependencies
+
+    def get_missing_projects_dependencies(self) -> Dict[str, Dict[str, Dependency]]:
+
+        missing_deps: Dict[str, Dict[str, Dependency]] = defaultdict(dict)
+
+        for project_name in self.projects:
+
+            deps_summary = self.get_project_dependencies(project_name)
+
+            for group_name, group_deps in deps_summary.groups.items():
+                repo_group_name = "--".join([project_name, group_name])
+                repo_group_deps = deps_summary.repo_groups.get(repo_group_name, Group())
+                for dep_name in group_deps.dependencies:
+                    if dep_name in self.projects:
+                        continue
+                    if dep_name not in repo_group_deps.dependencies:
+                        # We need to add the dependency to the group !
+                        # But it would be better to add all dependencies of same group at the same time
+                        # It will avoid resolving poetry lock too many times
+                        group_dep = group_deps.dependencies[dep_name]
+                        missing_deps[repo_group_name][dep_name] = (
+                            group_dep
+                            if isinstance(group_dep, Dependency)
+                            else Dependency(version=group_dep)
+                        )
+
+            for dep_name, dep_spec in deps_summary.dependencies.items():
+                if dep_name in self.projects:
+                    continue
+                repo_dependencies = deps_summary.repo_dependencies
+                if dep_name not in repo_dependencies:
+                    for group in deps_summary.repo_groups.values():
+                        if dep_name in group.dependencies:
+                            break
+                    else:
+                        missing_deps[project_name][dep_name] = dep_spec
+        return missing_deps
+
+    def get_project_dependencies(self, name: str) -> ProjectDependencies:
+        deps = self.get_all_projects_dependencies(include=[name])
+        return deps[name]
 
     def get_packages_lock(self) -> Dict[str, Any]:
         lock_path = self.root / "poetry.lock"
@@ -217,51 +358,47 @@ class KRepo(BaseKRepo):
         for project in self.projects_sequence:
             project.clean_poetry_files()
 
-    def get_projects_stack(
-        self,
-        include: Optional[Iterable[str]] = None,
-        exclude: Optional[Iterable[str]] = None,
-    ) -> Iterator[KProject]:
-        """Get project stack according to dependency order"""
-        must_install: Set[str] = set(include) if include else set()
-        for project in self.find_projects(include=include, exclude=exclude):
-            must_install.update(project.get_repo_dependencies_names())
-        for project_name in list(must_install):
-            must_install.update(self.projects[project_name].get_dependencies_names())
-        for project in self.projects_sequence:
-            if filter_project(project.name, must_install, exclude):
-                yield project
+    def clean(self, remove_venv: bool = False) -> None:
+        """Remove well-known non versioned files"""
+        to_remove = [expr for expr in self.gitignore if expr not in (".venv", ".venv/")]
+        # Remove venv
+        if remove_venv:
+            shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
+        # clean monorepo
+        for path in find_dirs(to_remove, self.root):
+            shutil.rmtree(path, ignore_errors=True)
+        # Remove files
+        for path in find_files(to_remove, self.root):
+            path.unlink(missing_ok=True)
 
-    def get_projects_async_stack(
-        self,
-        include: Optional[Iterable[str]] = None,
-        exclude: Optional[Iterable[str]] = None,
-    ) -> Iterator[List[KProject]]:
-        """Get async project stack according to dependency order"""
-        must_install: Set[str] = set(include) if include else set()
-        for project in self.find_projects(include=include, exclude=exclude):
-            must_install.update(project.get_repo_dependencies_names())
-        for project_name in list(must_install):
-            if project_name in self.projects:
-                must_install.update(
-                    self.projects[project_name].get_dependencies_names()
+        # Clean pyproject files
+        self.clean_pyproject_files()
+
+    async def add_missing_dependencies(self) -> None:
+        missing_deps = self.get_missing_projects_dependencies()
+        for group, deps in missing_deps.items():
+            for dep_name, dep in deps.items():
+                if dep.version is None or dep.version == "*":
+                    package = dep_name
+                else:
+                    package = f"{dep_name}@{dep.version}"
+                await self.add(
+                    package,
+                    group=group,
+                    editable=True if dep.develop else False,
+                    extras=dep.extras,
+                    optional=True if dep.optional else False,
+                    python=dep.python,
+                    lock=True,
                 )
-        for projects in self.projects_async_sequences:
-            include_projects: List[KProject] = []
-            for project in projects:
-                if filter_project(project.name, must_install, exclude):
-                    include_projects.append(project)
-            if include_projects:
-                yield include_projects
 
-    async def install_projects(
+    async def install_poetry_projects(
         self,
         include_projects: List[str],
         exclude_projects: Optional[Iterable[str]] = None,
         include_groups: Optional[Iterable[str]] = None,
         exclude_groups: Optional[Iterable[str]] = None,
         only_groups: Optional[Iterable[str]] = None,
-        no_root: bool = False,
         default: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
@@ -272,16 +409,16 @@ class KRepo(BaseKRepo):
             await self.venv()
         else:
             await self.ensure_venv()
+        # Make sure to add missing dependencies
         try:
             # Compute deadline to use to enforce timeouts
             deadline = get_deadline(timeout, deadline)
             # Perform first round of install
-            root_install_cmd = await self.install(
+            await self.install(
                 include_groups=include_projects,
                 exclude_groups=exclude_projects,
                 raise_on_error=True,
                 deadline=deadline,
-                no_root=no_root,
                 echo_stdout=echo,
             )
             # List of all results
@@ -306,18 +443,18 @@ class KRepo(BaseKRepo):
                             async def install_project(project: KProject) -> None:
                                 nonlocal results
                                 print(f"Starting install for {project.name}")
-                                cmd = await project.install(
+                                cmd = await project.install_pep_660(
                                     exclude_groups=exclude_groups,
                                     include_groups=include_groups,
                                     only_groups=only_groups,
                                     default=default,
-                                    no_root=no_root,
-                                    deadline=root_install_cmd.deadline,
+                                    deadline=deadline,
                                     raise_on_error=False,
                                     clean=False,
                                 )
-                                results.append(cmd)
-                                if cmd.code == 0:
+                                if cmd:
+                                    results.append(cmd)
+                                if cmd is None or cmd.code == 0:
                                     print(f"Sucessfully installed {project.name}")
                                 else:
                                     print(f"Failed  to install {project.name}")
@@ -345,20 +482,12 @@ class KRepo(BaseKRepo):
                             include_groups=include_groups,
                             only_groups=only_groups,
                             default=default,
-                            no_root=no_root,
-                            deadline=root_install_cmd.deadline,
+                            deadline=deadline,
                             raise_on_error=False,
                             clean=False,
                         )
-                        all_results.append(cmd)
-                        if cmd.code == 0:
-                            print(f"Sucessfully installed {project.name}")
-                        else:
-                            print(f"Failed  to install {project.name}")
-                            print("Captured stdout:")
-                            print(cmd.stdout)
-                            print("Captured stderr:", file=sys.stderr)
-                            print(cmd.stderr, file=sys.stderr)
+                        if cmd:
+                            all_results.append(cmd)
             # Return all results
             return all_results
         # Always clean files if required
@@ -366,9 +495,9 @@ class KRepo(BaseKRepo):
             if clean:
                 self.clean_pyproject_files()
 
-    async def install_projects_broken(
+    async def install_editable_projects(
         self,
-        include_projects: List[str],
+        include_projects: Optional[List[str]] = None,
         exclude_projects: Optional[Iterable[str]] = None,
         include_groups: Optional[Iterable[str]] = None,
         exclude_groups: Optional[Iterable[str]] = None,
@@ -389,7 +518,7 @@ class KRepo(BaseKRepo):
             deadline = get_deadline(timeout, deadline)
 
             # Perform first round of install
-            root_install_cmd = await self.install(
+            await self.install(
                 include_groups=include_projects,
                 exclude_groups=exclude_projects,
                 raise_on_error=True,
@@ -399,40 +528,33 @@ class KRepo(BaseKRepo):
             )
             # List of all results
             all_results: List[Command] = []
-            # Iterate over concurrent sequences
-            for projects in self.get_projects_async_stack(
+            async_stack = self.get_projects_async_stack(
                 include=include_projects, exclude=exclude_projects
-            ):
+            )
+            # Iterate over concurrent sequences
+            for projects in async_stack:
                 # Create a variable which will hold results for this round of projects
                 results: List[Command] = []
                 # Create a task group to coordinate installs
                 async with create_task_group() as tg:
                     # Iterate over each project
                     for project in projects:
+                        print(f"Starting install for {project.name}")
 
                         # Define function to perform install
                         async def install_project(project: KProject) -> None:
                             nonlocal results
-                            print(f"Starting install for {project.name}")
-                            cmd = await project.install(
+                            cmd = await project.install_pep_660(
                                 exclude_groups=exclude_groups,
                                 include_groups=include_groups,
                                 only_groups=only_groups,
                                 default=default,
-                                no_root=no_root,
-                                deadline=root_install_cmd.deadline,
-                                raise_on_error=False,
+                                deadline=deadline,
+                                raise_on_error=True,
                                 clean=False,
                             )
-                            results.append(cmd)
-                            if cmd.code == 0:
-                                print(f"Sucessfully installed {project.name}")
-                            else:
-                                print(f"Failed  to install {project.name}")
-                                print("Captured stdout:")
-                                print(cmd.stdout)
-                                print("Captured stderr:", file=sys.stderr)
-                                print(cmd.stderr, file=sys.stderr)
+                            if cmd:
+                                results.append(cmd)
 
                         # Kick off install
                         tg.start_soon(
@@ -469,49 +591,23 @@ class KRepo(BaseKRepo):
                 # Define function to perform install
                 async def build_project(project: KProject) -> None:
                     nonlocal results
-                    cmd = await project.build(
-                        env=env,
-                        deadline=deadline,
-                        raise_on_error=False,
-                        clean=clean,
-                    )
+                    try:
+                        cmd = await project.build(
+                            env=env,
+                            deadline=deadline,
+                            raise_on_error=False,
+                            clean=clean,
+                        )
+                    except Exception as err:
+                        logger.error(f"Failed to build {project.name}", exc_info=err)
+                        return
                     results.append(cmd)
                     if cmd.code == 0:
-                        print(f"Sucessfully installed {project.name}")
+                        print(f"Sucessfully built {project.name}")
                     else:
-                        print(f"Failed  to install {project.name}")
+                        print(f"Failed to build {project.name}")
 
                 # Kick off install
                 tg.start_soon(build_project, project, name=f"build-{project.name}")
         # Return all results
         return results
-
-    def clean(self, remove_venv: bool = False) -> None:
-        """Remove well-known non versioned files"""
-        # Remove venv
-        if remove_venv:
-            shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
-        # clean monorepo
-        for path in find_files(
-            (
-                "**/__pycache__",
-                "**/build",
-                "**/*.egg-info",
-                "**/.ipynb_checkpoints",
-                "**/.coverage",
-                "**/.mypycache",
-                "**/.pytest_cache",
-                "**/__pypackages__",
-            ),
-            self.root,
-        ):
-            shutil.rmtree(path, ignore_errors=True)
-        # Remove files
-        for path in find_files(
-            ("**/*.pyc"),
-            self.root,
-        ):
-            path.unlink(missing_ok=True)
-
-        # Clean pyproject files
-        self.clean_pyproject_files()

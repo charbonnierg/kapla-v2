@@ -19,7 +19,7 @@ from typing import (
 
 from pydantic import BaseModel
 
-from kapla.specs.pyproject import PyProjectSpec
+from kapla.specs.pyproject import Dependency, PyProjectSpec
 from kapla.specs.repo import KPyProjectSpec
 
 from .base import BaseProject
@@ -52,18 +52,6 @@ class BasePyProject(BaseProject[PyProjectSpec], spec=PyProjectSpec):
         # Use method from parent class
         return super().get_property(key, raw=raw)
 
-    def set_properties(self, properties: Dict[str, Any]) -> None:
-        for key in list(properties):
-            # Process first token
-            first_token = key.split(".")[0]
-            # Add "poetry.tool" prefix when needed
-            if first_token not in self._FIELDS:
-                new_key = "tool.poetry." + key
-                properties[new_key] = properties[key]
-                del properties[key]
-        # Use method from parent class
-        return super().set_properties(properties)
-
     def read(self, path: Union[str, Path]) -> Any:
         """Read TOML pyproject specs"""
         return load_toml(path)
@@ -91,20 +79,10 @@ class PyProject(BasePyProject):
         """The project name"""
         return self.spec.tool.poetry.name
 
-    @name.setter
-    def name(self, value: str) -> None:
-        """Update project name"""
-        self.set_property("tool.poetry.name", value)
-
     @property
     def version(self) -> str:
         """The project version"""
         return self.spec.tool.poetry.version
-
-    @version.setter
-    def version(self, value: str) -> None:
-        """Update the project version"""
-        self.set_property("tool.poetry.version", value)
 
     async def build(
         self,
@@ -406,6 +384,36 @@ class PyProject(BasePyProject):
             cmd.add_option("--dry-run", dry_run)
         return await cmd.run(rc=0 if raise_on_error else None)
 
+    def get_dependency(self, name: str) -> Optional[Dependency]:
+        dep = self.spec.tool.poetry.dependencies.get(name)
+        if dep is None:
+            return None
+        return dep if isinstance(dep, Dependency) else Dependency(version=dep)
+
+    def get_group_dependency(self, group_name: str, name: str) -> Optional[Dependency]:
+        group = self.spec.tool.poetry.group.get(group_name)
+        if group is None:
+            return None
+        dep = group.dependencies.get(name)
+        if dep is None:
+            return None
+        return dep if isinstance(dep, Dependency) else Dependency(version=dep)
+
+    def get_dependencies(self) -> Dict[str, Dependency]:
+        return {
+            name: dep if isinstance(dep, Dependency) else Dependency(version=dep)
+            for name, dep in self.spec.tool.poetry.dependencies.items()
+        }
+
+    def get_group_dependencies(self, group_name: str) -> Dict[str, Dependency]:
+        group = self.spec.tool.poetry.group.get(group_name, None)
+        if group is None:
+            return {}
+        return {
+            name: dep if isinstance(dep, Dependency) else Dependency(version=dep)
+            for name, dep in group.dependencies.items()
+        }
+
 
 class BaseKPyProject(PyProject, spec=KPyProjectSpec):
     __SPEC__: Type[KPyProjectSpec]
@@ -423,11 +431,18 @@ class KPyProject(BaseKPyProject):
         self.repo = repo
 
     @property
-    def python_executable(self) -> str:
+    def venv_path(self) -> Path:
         if self.repo:
-            return self.repo.python_executable
+            return self.repo.venv_path
         else:
-            return super().python_executable
+            return super().venv_path
+
+    @property
+    def gitignore(self) -> List[str]:
+        if self.repo:
+            return self.repo.gitignore
+        else:
+            return super().gitignore
 
     async def venv(
         self,

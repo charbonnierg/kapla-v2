@@ -13,6 +13,7 @@ from anyio._core._eventloop import get_asynclib
 from anyio.streams.text import TextReceiveStream
 
 from .errors import CommandCancelledError, CommandFailedError
+from .logger import logger
 
 
 def echo(text: str, file: TextIO = sys.stdout) -> None:
@@ -134,6 +135,7 @@ class Command:
         self._cancel_scope = await self._exitstack.enter_async_context(
             move_on_after(self.timeout)
         )
+        logger.info("Running command", cwd=self.cwd, cmd=self.cmd)
         self.process = await self._exitstack.enter_async_context(
             await open_process(self.cmd, **self.options)  # type: ignore[arg-type]
         )

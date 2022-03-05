@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 from pydantic import Field
 
 from .base import AliasedModel
-from .pyproject import PyProjectSpec, PyProjectTooling
+from .pyproject import Dependency, Group, PyProjectSpec, PyProjectTooling
 
 
 class RepoConfig(AliasedModel):
@@ -23,3 +23,11 @@ class RepoSpec(PyProjectSpec):
 
 class KPyProjectSpec(RepoSpec):
     pass
+
+
+class ProjectDependencies(AliasedModel):
+    repo_dependencies: Dict[str, Dependency] = {}
+    repo_groups: Dict[str, Group] = {}
+    dependencies: Dict[str, Dependency] = {}
+    groups: Dict[str, Group] = {}
+    python: str

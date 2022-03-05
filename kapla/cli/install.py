@@ -74,7 +74,7 @@ def do_install(args: Any) -> None:
         update_venv = True
     # Define function to perform install
     install = partial(
-        repo.install_projects,
+        repo.install_editable_projects,
         include_projects=include_projects,
         exclude_projects=exclude_projects,
         exclude_groups=exclude_groups,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import (
@@ -19,7 +18,7 @@ from typing import (
     Union,
 )
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from kapla.specs.common import BuildSystem
 from kapla.specs.kproject import ProjectSpec
@@ -34,8 +33,9 @@ from kapla.specs.pyproject import (
 from .base import BaseProject
 from .cmd import Command
 from .errors import CommandFailedError
-from .finder import find_files
+from .finder import find_dirs, find_files
 from .io import load_yaml, write_toml, write_yaml
+from .logger import logger
 from .pyproject import KPyProject
 
 if TYPE_CHECKING:
@@ -50,22 +50,28 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
     """Base class for pyproject files implementing read and write operations"""
 
     def __init__(
-        self, filepath: Union[str, Path], repo: Optional[KRepo] = None
+        self,
+        filepath: Union[str, Path],
+        repo: Optional[KRepo] = None,
+        workspace: Optional[str] = None,
     ) -> None:
         super().__init__(filepath)
         self.repo = repo
+        self.workspace = workspace
 
     @property
-    def python_executable(self) -> str:
-        """Best guess to find python interpreter associated with the project"""
+    def gitignore(self) -> List[str]:
         if self.repo:
-            for python_path in find_files(
-                ("**/python", "**/python.exe"), self.repo.root / ".venv"
-            ):
-                # Return path to executable
-                return python_path.as_posix()
-        # Return current executable by default
-        return sys.executable
+            return self.repo.gitignore
+        else:
+            return super().gitignore
+
+    @property
+    def venv_path(self) -> Path:
+        if self.repo:
+            return self.repo.venv_path
+        else:
+            return super().venv_path
 
     @property
     def pyproject_path(self) -> Path:
@@ -77,20 +83,10 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
         """The project name"""
         return self.spec.name
 
-    @name.setter
-    def name(self, value: str) -> None:
-        """Update project name"""
-        self.set_property("name", value)
-
     @property
     def version(self) -> str:
         """The project version"""
         return self.spec.version
-
-    @version.setter
-    def version(self, value: str) -> None:
-        """Update the project version"""
-        self.set_property("version", value)
 
     def read(self, path: Union[str, Path]) -> Any:
         """Read YAML project specs"""
@@ -100,7 +96,7 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
         """Write YAML project specs"""
         return write_yaml(self._raw, path)
 
-    def get_repo_dependencies(self) -> Dict[str, Dependency]:
+    def get_local_dependencies(self) -> Dict[str, Dependency]:
         """Get a dict holding local dependencies of project"""
         # We cannot do anything without a repo
         if self.repo is None:
@@ -126,6 +122,8 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
 
     def get_build_dependencies(
         self,
+        include_local: bool = True,
+        include_python: bool = True,
     ) -> Tuple[Dict[str, Dependency], Dict[str, List[str]], Dict[str, Group]]:
         """Return dependencies, extras and groups"""
         dependencies: Dict[str, Dependency] = {}
@@ -139,14 +137,16 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
         for dep in self.spec.dependencies:
             if isinstance(dep, str):
                 dependencies[dep] = Dependency.parse_obj(
-                    {"version": lock.get(dep, {"version": "*"})["version"]}
+                    {"version": lock.get(dep.lower(), {"version": "*"})["version"]}
                 )
             else:
                 for key, value in dep.items():
                     dependencies[key] = Dependency.parse_obj(
                         {
                             **value.dict(exclude_unset=True, by_alias=True),
-                            "version": lock.get(key, {"version": "*"})["version"],
+                            "version": lock.get(key.lower(), {"version": "*"})[
+                                "version"
+                            ],
                         }
                     )
         # Iterate over extra dependencies and replace version
@@ -196,9 +196,15 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
                                 }
                             )
         # Make sure python dependency is set
-        if "python" not in dependencies:
-            dependencies["python"] = lock.get("python", ">=3.8,<4")
-
+        if include_python:
+            if "python" not in dependencies:
+                dependencies["python"] = lock.get("python", ">=3.8,<4")
+        else:
+            dependencies.pop("python", None)
+        # Remove local deps
+        if not include_local:
+            for dep in self.get_local_dependencies_names():
+                dependencies.pop(dep)
         # Return values
         return dependencies, extras, groups
 
@@ -206,7 +212,7 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
         self,
     ) -> Tuple[Dict[str, Dependency], Dict[str, List[str]], Dict[str, Group]]:
         dependencies, extras, groups = self.get_build_dependencies()
-        local_dependencies = self.get_repo_dependencies()
+        local_dependencies = self.get_local_dependencies()
         # Iterate a second time on dependencies to apply dep overrides
         for name in dependencies:
             if name in local_dependencies:
@@ -238,9 +244,9 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
                         names.add(name)
         return list(names)
 
-    def get_repo_dependencies_names(self) -> List[str]:
+    def get_local_dependencies_names(self) -> List[str]:
         """Get local dependencies names (include all groups)"""
-        return list(self.get_repo_dependencies())
+        return list(self.get_local_dependencies())
 
     def get_pyproject_spec(
         self, develop: bool = False, build_system: BuildSystem = DEFAULT_BUILD_SYSTEM
@@ -278,13 +284,13 @@ class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
         """
         spec = self.get_pyproject_spec(develop=develop, build_system=build_system)
         pyproject_path = Path(path) if path else self.pyproject_path
-        if not pyproject_path.exists():
-            write_toml(spec.dict(), pyproject_path)
+        content = spec.dict()
+        write_toml(content, pyproject_path)
+        try:
             pyproject = KPyProject(pyproject_path, repo=self.repo)
-        else:
-            pyproject = KPyProject(pyproject_path, repo=self.repo)
-            write_toml(spec.dict(), pyproject_path)
-            pyproject = KPyProject(pyproject_path, repo=self.repo)
+        except ValidationError as err:
+            logger.error("Failed to validate", exc_info=err)
+            raise
         return pyproject
 
     @contextmanager
@@ -382,7 +388,7 @@ class KProject(BaseKProject):
         else:
             try:
                 for project in self.repo.get_projects_stack(
-                    self.get_repo_dependencies_names()
+                    self.get_local_dependencies_names()
                 ):
                     project.write_pyproject(develop=True)
                 # Write pyproject
@@ -426,6 +432,24 @@ class KProject(BaseKProject):
                 raise_on_error=raise_on_error,
             )
 
+    def should_skip_install(self) -> bool:
+        if self.repo:
+            for _ in find_files(
+                f"{self.name.replace('-','_').lower()}.pth",
+                root=self.venv_path,
+                ignore=[
+                    "bin/",
+                    "Scripts/",
+                    "include",
+                    "Include",
+                    "share",
+                    "doc",
+                    "etc",
+                ],
+            ):
+                return True
+        return False
+
     async def install(
         self,
         exclude_groups: Union[Iterable[str], str, None] = None,
@@ -441,7 +465,9 @@ class KProject(BaseKProject):
         deadline: Optional[float] = None,
         raise_on_error: bool = False,
         clean: bool = True,
-    ) -> Command:
+    ) -> Optional[Command]:
+        if self.should_skip_install():
+            return None
         with self.temporary_pyproject(
             self.pyproject_path,
             clean=clean,
@@ -462,31 +488,65 @@ class KProject(BaseKProject):
                 raise_on_error=raise_on_error,
             )
 
+    async def install_pep_660(
+        self,
+        exclude_groups: Union[Iterable[str], str, None] = None,
+        include_groups: Union[Iterable[str], str, None] = None,
+        only_groups: Union[Iterable[str], str, None] = None,
+        default: bool = False,
+        build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
+        raise_on_error: bool = False,
+        clean: bool = True,
+    ) -> Optional[Command]:
+        if not self.repo:
+            raise NotImplementedError(
+                "PEP 660 install is not supported without parent repo"
+            )
+        if self.should_skip_install():
+            return None
+        groups = list(self.spec.extras)
+        if default:
+            groups = []
+        elif only_groups:
+            groups = [group for group in groups if group in only_groups]
+        else:
+            if exclude_groups:
+                groups = [group for group in groups if group not in exclude_groups]
+            if include_groups:
+                groups = [group for group in groups if group in include_groups]
+        target = self.root.as_posix()
+        if groups:
+            target += f'[{",".join(groups)}]'
+        with self.temporary_pyproject(
+            self.pyproject_path,
+            clean=clean,
+            develop=False,
+            build_system=build_system,
+        ):
+            return await self.repo.pip_install(
+                "-e",
+                target,
+                timeout=timeout,
+                deadline=deadline,
+                raise_on_error=raise_on_error,
+            )
+
     def clean(self) -> None:
         """Remove well-known non versioned files"""
         # Remove venv
         shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
         # Remove directories
-        for path in find_files(
-            (
-                "**/__pycache__",
-                "**/.venv",
-                "**/venv",
-                "**/build",
-                "**/dist",
-                "**/*.egg-info",
-                "**/.coverage",
-                "**/.mypycache",
-                "**/.pytest_cache",
-                "**/__pypackages__",
-            ),
+        for path in find_dirs(
+            self.gitignore,
             self.root,
         ):
             shutil.rmtree(path, ignore_errors=True)
         # Remove files
         for path in find_files(
-            ("**/poetry.lock", "**/pyproject.toml", "**/*.pyc"),
-            self.root,
+            self.gitignore,
+            root=self.root,
         ):
             path.unlink(missing_ok=True)
 
@@ -535,12 +595,7 @@ class KProject(BaseKProject):
             new_packages = set(group_after.dependencies).difference(
                 group_before.dependencies
             )
-            # Write new package
-            # for package in new_packages:
-            #     if group:
-            #         self.set_property(f"group.{group}.dependencies.$push", package)
-            #     else:
-            #         self.set_property("dependencies.$push", pack)
+            # FIXME: Write new deps in YAML proejct
             # Return new packages
             return {name: group_after.dependencies[name] for name in new_packages}
 

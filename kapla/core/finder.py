@@ -1,8 +1,205 @@
 from __future__ import annotations
 
+import fnmatch
 import os
+import re
 from pathlib import Path
-from typing import Iterator, Optional, Tuple, Union
+from typing import Iterable, Iterator, Optional, Pattern, Tuple, Union
+
+DEFAULT_GITIGNORE = [
+    "__pycache__/",
+    "**/.ipynb_checkpoints",
+    "build/",
+    "develop-eggs/",
+    "dist/",
+    "downloads/",
+    "eggs/",
+    ".eggs/",
+    "lib/",
+    "lib64/",
+    "parts/",
+    "sdist/",
+    "var/",
+    "wheels/",
+    "share/python-wheels/",
+    "*.egg-info/",
+    "htmlcov/",
+    ".tox/",
+    ".nox/",
+    ".coverage",
+    ".coverage.*",
+    ".cache",
+    "*.cover",
+    "*.py,cover",
+    ".hypothesis/",
+    ".pytest_cache/",
+    "cover/",
+    "instance/",
+    ".webassets-cache",
+    ".scrapy",
+    "docs/_build/",
+    ".pybuilder/",
+    "target/",
+    "profile_default/",
+    "__pypackages__/",
+    ".env",
+    ".venv",
+    "env",
+    "venv",
+    "ENV",
+    "env.bak",
+    "venv.bak",
+    ".spyderproject",
+    ".spyproject",
+    ".ropeproject",
+    "/site",
+    ".mypy_cache/",
+    ".pyre/",
+    ".pytype/",
+    "cython_debug/",
+    ".git",
+    ".ipynb_checkpoints",
+    ".vscode",
+]
+
+
+def get_patterns(
+    pattern: Union[str, Iterable[str]],
+    ignore: Union[str, Iterable[str], None] = None,
+) -> Tuple[Pattern[str], Optional[Pattern[str]]]:
+    """Get patterns to filter filenames"""
+    if isinstance(pattern, str):
+        pattern = [pattern]
+    if isinstance(ignore, str):
+        ignore = [ignore]
+
+    ignore_re: Optional[Pattern[str]] = None
+
+    if ignore:
+        ignore_iterable = set(
+            [dirname[:-1] for dirname in ignore if dirname.endswith("/")] + list(ignore)
+        )
+        ignore_expr = "|".join([fnmatch.translate(p) for p in ignore_iterable])
+        ignore_re = re.compile(ignore_expr)
+
+    pattern_expr = "|".join(fnmatch.translate(p) for p in pattern)
+    pattern_re = re.compile(pattern_expr)
+
+    return pattern_re, ignore_re
+
+
+def check_exclude(path: Path, pattern: Optional[Pattern[str]] = None) -> bool:
+    """Check if a file or directory should be excluded"""
+    if pattern is None:
+        return False
+    if pattern.match(path.name):
+        return True
+    if pattern.match(path.as_posix()):
+        return True
+    return False
+
+
+def find_files(
+    pattern: Union[str, Iterable[str]],
+    root: Union[Path, str, None] = None,
+    ignore: Union[str, Iterable[str]] = [],
+) -> Iterator[Path]:
+    """Find files recursively."""
+
+    root = Path(root).resolve(True) if root else Path.cwd().resolve(True)
+
+    pattern_re, ignore_re = get_patterns(pattern, ignore)
+
+    for current_dir, child_dirs, current_files in os.walk(root):
+
+        current_path = root / current_dir
+
+        if check_exclude(current_path, ignore_re):
+            child_dirs.clear()
+            continue
+
+        keep_child_dirs = [
+            dirname
+            for dirname in child_dirs
+            if not check_exclude(current_path / dirname, ignore_re)
+        ]
+        excluded_dirs = set(child_dirs).difference(keep_child_dirs)
+
+        for dirname in excluded_dirs:
+            child_dirs.remove(dirname)
+
+        for file in current_files:
+            if pattern_re.match(file):
+                yield current_path / file
+
+
+def find_dirs(
+    pattern: Union[str, Iterable[str]],
+    root: Union[Path, str, None] = None,
+    ignore: Union[str, Iterable[str]] = [],
+) -> Iterator[Path]:
+    """Find directories recursively."""
+
+    root = Path(root).resolve(True) if root else Path.cwd().resolve(True)
+
+    pattern_re, ignore_re = get_patterns(pattern, ignore)
+
+    for current_dir, child_dirs, current_files in os.walk(root):
+
+        current_path = root / current_dir
+
+        if check_exclude(current_path, ignore_re):
+            child_dirs.clear()
+            continue
+
+        for dirname in child_dirs:
+
+            if check_exclude(current_path / dirname, ignore_re):
+                continue
+
+            if pattern_re.match(dirname):
+                yield current_path / dirname
+
+
+def find_files_using_gitignore(
+    pattern: Union[str, Iterable[str]] = "*",
+    root: Union[Path, str, None] = None,
+    gitignore: Union[Path, str, None] = None,
+) -> Iterator[Path]:
+    """Find find recursively. Use gitignore to filter directories"""
+
+    if gitignore is None:
+        lines = DEFAULT_GITIGNORE
+    else:
+        lines = [
+            line
+            for line in Path(gitignore).read_text().splitlines(False)
+            if line and not line.startswith("#")
+        ]
+
+    return find_files(pattern, root, lines)
+
+
+def find_dirs_using_gitignore(
+    pattern: Union[str, Iterable[str]] = "*",
+    root: Union[Path, str, None] = None,
+    gitignore: Union[Path, str, None] = None,
+) -> Iterator[Path]:
+    """Find directories recursively. Use gitignore to filter directories.
+
+    If not path is provided for gitinogre argument, default values are used
+    """
+
+    if gitignore is None:
+        lines = DEFAULT_GITIGNORE
+    else:
+        lines = [
+            line
+            for line in Path(gitignore).read_text().splitlines(False)
+            if line and not line.startswith("#")
+        ]
+
+    return find_dirs(pattern, root, lines)
 
 
 def lookup_file(
@@ -45,15 +242,3 @@ def lookup_file(
                     current = parent
                     # Increment directory index and reenter the while loop
                     current_idx += 1
-
-
-def find_files(
-    pattern: Union[str, Tuple[str, ...]], start: Union[None, str, Path] = None
-) -> Iterator[Path]:
-    """Use a glob pattern to find files from start directory"""
-    current = Path(start).resolve(True) if start else Path.cwd()
-    if isinstance(pattern, str):
-        pattern = (pattern,)
-    for _pattern in pattern:
-        for path in current.glob(_pattern):
-            yield path

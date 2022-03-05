@@ -253,8 +253,8 @@ def do_install_project(args: Any) -> None:
     project = repo.find_current_project()
     # Install project with its deps
     install_func = partial(
-        repo.install_projects,
-        include_projects=[project.name] + project.get_repo_dependencies_names(),
+        repo.install_editable_projects,
+        include_projects=[project.name] + project.get_local_dependencies_names(),
         include_groups=include_groups,
         exclude_groups=exclude_groups,
         only_groups=only_groups,
