@@ -10,6 +10,7 @@ from .install import do_install, set_install_parser
 from .project import (
     do_add_dependency,
     do_build_project,
+    do_create_new_project,
     do_install_project,
     do_remove_dependency,
     do_show_dependencies,
@@ -70,3 +71,5 @@ def app() -> None:
             do_remove_dependency(args)
         elif args.action == "add":
             do_add_dependency(args)
+        elif args.action == "new":
+            do_create_new_project(args)

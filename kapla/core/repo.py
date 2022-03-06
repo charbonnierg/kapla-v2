@@ -21,7 +21,7 @@ from typing import (
 from anyio import create_task_group
 
 from kapla.specs.pyproject import Dependency, Group
-from kapla.specs.repo import ProjectDependencies, RepoSpec
+from kapla.specs.repo import ProjectDependencies, KRepoSpec
 
 from .cmd import Command, echo, get_deadline
 from .errors import KProjectNotFoundError
@@ -46,9 +46,9 @@ def filter_project(
     return True
 
 
-class BaseKRepo(BaseKPyProject, spec=RepoSpec):
-    __SPEC__: Type[RepoSpec]  # type: ignore[assignment]
-    spec: RepoSpec  # type: ignore[assignment]
+class BaseKRepo(BaseKPyProject, spec=KRepoSpec):
+    __SPEC__: Type[KRepoSpec]  # type: ignore[assignment]
+    spec: KRepoSpec  # type: ignore[assignment]
 
 
 class KRepo(BaseKRepo):

@@ -21,7 +21,7 @@ from typing import (
 from pydantic import BaseModel, ValidationError
 
 from kapla.specs.common import BuildSystem
-from kapla.specs.kproject import ProjectSpec
+from kapla.specs.kproject import KProjectSpec
 from kapla.specs.pyproject import (
     DEFAULT_BUILD_SYSTEM,
     Dependency,
@@ -46,7 +46,7 @@ SpecT = TypeVar("SpecT", bound=BaseModel)
 ProjectT = TypeVar("ProjectT", bound="BaseKProject")
 
 
-class BaseKProject(BaseProject[ProjectSpec], spec=ProjectSpec):
+class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
     """Base class for pyproject files implementing read and write operations"""
 
     def __init__(
@@ -644,3 +644,52 @@ class KProject(BaseKProject):
             raise NotImplementedError(
                 "It's not possible to remove dependencies to projet without parent repo"
             )
+
+    async def build_docker(
+        self,
+        tag: str = "latest",
+        load: bool = False,
+        push: bool = False,
+        directory: Union[str, Path, None] = None,
+    ) -> Command:
+        """Build docker image for the projcet according to the project spec."""
+        spec = self.spec.docker
+        if not spec:
+            raise ValueError("No docker spec found for project")
+        if not self.repo:
+            raise ValueError("Cannot build docker images without parent repo")
+        template = spec.template or "library"
+        template_file = "Dockerfile." + template
+        template_path = self.repo.root / ".repo/templates/dockerfiles" / template_file
+        try:
+            shutil.copy2(template_path, self.root / "Dockerfile")
+            cmd = Command("docker buildx build")
+            if spec.base_image:
+                cmd.add_option("--build-arg", "BASE_IMAGE=" + spec.base_image)
+            cmd.add_option("--build-arg", "PACKAGE=" + self.name, escape=True)
+            cmd.add_option("--build-arg", "VERSION=" + self.version, escape=True)
+            cmd.add_repeat_option("--label", spec.labels)
+            cmd.add_option("--tag", ":".join([spec.image, tag]))
+            if load:
+                cmd.add_option("--load")
+            if push:
+                cmd.add_option("--push")
+            if directory is not None:
+                cmd.add_option(
+                    "--output",
+                    "type=local,dest=" + Path(self.root, directory).as_posix(),
+                )
+            cmd.add_option(
+                "--metadata-file",
+                Path(self.root, "dist", "-".join([self.name, self.version]) + ".docker-metadata").as_posix(),
+            )
+            if spec.platforms:
+                cmd.add_repeat_option("--platform", spec.platforms)
+            cmd.add_argument(
+                Path(self.root, spec.context).resolve(True).as_posix()
+                if spec.context
+                else self.root.as_posix()
+            )
+            return await cmd.run()
+        finally:
+            Path(self.root, "Dockerfile").unlink(missing_ok=True)

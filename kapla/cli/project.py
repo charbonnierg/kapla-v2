@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from argparse import ArgumentParser, _SubParsersAction
 from functools import partial
+from pathlib import Path
 from typing import Any, Optional, Tuple, Union
 
 from anyio import run
 
 from kapla.core.repo import KRepo
+from kapla.specs.kproject import KProjectSpec
 
 
 def set_show_parser(parser: ArgumentParser) -> None:
@@ -49,6 +51,10 @@ def set_build_parser(parser: ArgumentParser) -> None:
     parser.add_argument(
         "--no-clean", action="store_true", default=False, dest="no_clean"
     )
+
+
+def set_new_parser(parser: ArgumentParser) -> None:
+    parser.add_argument("package_name", default=None)
 
 
 def set_install_parser(parser: ArgumentParser) -> None:
@@ -131,6 +137,9 @@ def set_project_parser(
 
     remove_parser = project_actions_subparser.add_parser("remove", parents=[parent])
     set_add_parser(remove_parser)
+
+    new_parser = project_actions_subparser.add_parser("new", parents=[parent])
+    set_new_parser(new_parser)
 
 
 def do_remove_dependency(args: Any) -> None:
@@ -262,3 +271,43 @@ def do_install_project(args: Any) -> None:
         clean=clean,
     )
     run(install_func)
+
+
+def do_create_new_project(args: Any) -> None:
+    package_name: str = args.package_name
+    project_name = package_name.replace("_", "-")
+    package_name = project_name.replace("-", "_")
+    module = package_name.split("quara_")[-1]
+
+    repo = KRepo.find_current()
+    version = repo.version
+    cur_dir = Path.cwd()
+    project_root = cur_dir / project_name
+
+    project_root.mkdir(parents=False, exist_ok=False)
+
+    readme_path = project_root / "README.md"
+    readme_path.touch()
+
+    src_root = project_root / "quara"
+    src_root.mkdir(parents=False, exist_ok=False)
+
+    test_root = project_root / "tests"
+    test_root.mkdir(parents=False, exist_ok=False)
+
+    confest_path = test_root / "conftest.py"
+    confest_path.touch()
+
+    pkg_root = src_root / module
+    pkg_root.mkdir(parents=False, exist_ok=False)
+
+    init_path = pkg_root / "__init__.py"
+    init_path.touch()
+
+    project_path = project_root / "project.yml"
+
+    project_spec = KProjectSpec(  # noqa: F841
+        name=project_name, version=version, packages=[{"include": "quara"}]
+    )
+    # FIXME: Write project file
+    project_path.touch()

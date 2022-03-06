@@ -7,13 +7,15 @@ from .pyproject import DepedencyMeta
 
 class DockerSpec(AliasedModel):
     image: str
+    base_image: Optional[str] = None
     template: Optional[str] = None
     dockerfile: Optional[str] = None
     platforms: List[str] = ["linux/amd64"]
     context: str = "./"
+    labels: List[str] = []
 
 
-class ProjectSpec(BasePythonConfig):
+class KProjectSpec(BasePythonConfig):
     dependencies: List[Union[str, Dict[str, DepedencyMeta]]] = []
     docker: Optional[DockerSpec] = None
     # Docs: <https://python-poetry.org/docs/pyproject/#extras>

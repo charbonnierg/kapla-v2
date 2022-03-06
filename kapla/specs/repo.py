@@ -17,11 +17,11 @@ class RepoTooling(PyProjectTooling):
     auto_generated: Optional[bool] = Field(False, alias="auto-generated")
 
 
-class RepoSpec(PyProjectSpec):
+class KRepoSpec(PyProjectSpec):
     tool: RepoTooling
 
 
-class KPyProjectSpec(RepoSpec):
+class KPyProjectSpec(KRepoSpec):
     pass
 
 

@@ -1,5 +1,5 @@
-from .kproject import ProjectSpec
+from .kproject import KProjectSpec
 from .pyproject import PyProjectSpec
-from .repo import RepoSpec
+from .repo import KRepoSpec
 
-__all__ = ["RepoSpec", "ProjectSpec", "PyProjectSpec"]
+__all__ = ["KRepoSpec", "KProjectSpec", "PyProjectSpec"]

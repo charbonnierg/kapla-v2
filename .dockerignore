@@ -1,0 +1,12 @@
+.venv
+.azuredevops
+.vscode
+.coverage.*
+qeps
+**/__pycache__
+**/*.pyc
+.mypycache
+.pytest_cache
+junit-unit.xml
+coverage.xml
+coverage-report/
