@@ -20,6 +20,7 @@ from typing import (
 
 from pydantic import BaseModel, ValidationError
 
+from kapla.core.git import get_git_infos
 from kapla.specs.common import BuildSystem
 from kapla.specs.kproject import KProjectSpec
 from kapla.specs.pyproject import (
@@ -31,7 +32,7 @@ from kapla.specs.pyproject import (
 )
 
 from .base import BaseProject
-from .cmd import Command
+from .cmd import Command, get_deadline
 from .errors import CommandFailedError
 from .finder import find_dirs, find_files
 from .io import load_yaml, write_toml, write_yaml
@@ -82,6 +83,10 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
     def name(self) -> str:
         """The project name"""
         return self.spec.name
+
+    @property
+    def slug(self) -> str:
+        return self.spec.name.replace("-", "_")
 
     @property
     def version(self) -> str:
@@ -647,12 +652,34 @@ class KProject(BaseKProject):
 
     async def build_docker(
         self,
-        tag: str = "latest",
+        tag: Optional[str] = None,
         load: bool = False,
         push: bool = False,
-        directory: Union[str, Path, None] = None,
+        output_dir: Union[str, Path, None] = None,
+        build_dist: bool = True,
+        build_dist_env: Optional[Dict[str, str]] = None,
+        build_dist_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
     ) -> Command:
         """Build docker image for the projcet according to the project spec."""
+        # Gather deadline
+        deadline = get_deadline(timeout, deadline)
+        # Gather git infos
+        git_tag, git_branch, git_commit = await get_git_infos()
+        # Gather tag
+        if tag is None:
+            # Check if it's a release
+            if git_tag:
+                tag = git_tag
+            # Use branch and commit if available
+            elif git_branch and git_commit:
+                tag = "-".join([git_branch.split("/")[-1].lower(), git_commit])
+            # Use commit only
+            elif git_commit:
+                tag = git_commit
+            else:
+                tag = "latest"
         spec = self.spec.docker
         if not spec:
             raise ValueError("No docker spec found for project")
@@ -663,25 +690,59 @@ class KProject(BaseKProject):
         template_path = self.repo.root / ".repo/templates/dockerfiles" / template_file
         try:
             shutil.copy2(template_path, self.root / "Dockerfile")
-            cmd = Command("docker buildx build")
-            if spec.base_image:
-                cmd.add_option("--build-arg", "BASE_IMAGE=" + spec.base_image)
-            cmd.add_option("--build-arg", "PACKAGE=" + self.name, escape=True)
-            cmd.add_option("--build-arg", "VERSION=" + self.version, escape=True)
+            cmd = Command("docker buildx build", deadline=deadline)
+            build_args = spec.build_args.copy() if spec.build_args else {}
+            if spec.base_image and "BASE_IMAGE" not in build_args:
+                if ":" not in spec.base_image:
+                    base_image = spec.base_image + ":" + tag
+                else:
+                    base_image = spec.base_image
+                build_args["BASE_IMAGE"] = base_image
+            build_args["PACKAGE_NAME"] = self.name
+            build_args["PACKAGE_VERSION"] = self.version
+            if git_commit:
+                build_args["GIT_COMMIT"] = git_commit
+            if git_branch:
+                build_args["GIT_BRANCH"] = git_branch
+            if git_tag:
+                build_args["GIT_TAG"] = git_tag
+            # Add build args
+            for key, value in build_args.items():
+                cmd.add_option("--build-arg", "=".join([key, value]), escape=True)
+            # Add labels
             cmd.add_repeat_option("--label", spec.labels)
+            cmd.add_repeat_option(
+                "--label",
+                [
+                    f"quara.package.version={self.version}",
+                    f"quara.package.name={self.name}",
+                ],
+            )
+            # Add git infos as labels
+            if git_tag:
+                cmd.add_option("--label", f"git.tag.name={git_tag}")
+            if git_branch:
+                cmd.add_option("--label", f"git.branch.name={git_branch}")
+            if git_commit:
+                cmd.add_option("--label", f"git.commit={git_commit}")
+            # Add tag
             cmd.add_option("--tag", ":".join([spec.image, tag]))
             if load:
                 cmd.add_option("--load")
             if push:
                 cmd.add_option("--push")
-            if directory is not None:
+            if output_dir is not None:
                 cmd.add_option(
                     "--output",
-                    "type=local,dest=" + Path(self.root, directory).as_posix(),
+                    "type=local,dest=" + Path(self.root, output_dir).as_posix(),
                 )
             cmd.add_option(
                 "--metadata-file",
-                Path(self.root, "dist", "-".join([self.name, self.version]) + ".docker-metadata").as_posix(),
+                Path(
+                    self.root,
+                    "dist",
+                    "-".join([self.name, self.version]) + ".docker-metadata",
+                ).as_posix(),
             )
             if spec.platforms:
                 cmd.add_repeat_option("--platform", spec.platforms)
@@ -690,6 +751,23 @@ class KProject(BaseKProject):
                 if spec.context
                 else self.root.as_posix()
             )
+            if build_dist:
+                # Make sure sources are built before actually running the command
+                await self.build(
+                    env=build_dist_env,
+                    build_system=build_dist_system,
+                    deadline=deadline,
+                )
+                # Copy dist into project dist
+                dist_root = self.root / "dist"
+                dist_root.mkdir(exist_ok=True, parents=False)
+                for dep in self.repo.get_projects_stack(include=[self.name]):
+                    if dep.name == self.name:
+                        continue
+                    await self.run(
+                        f"cp -f dist/*.whl {dist_root.as_posix()}", cwd=dep.root
+                    )
+            # Run docker build command
             return await cmd.run()
         finally:
             Path(self.root, "Dockerfile").unlink(missing_ok=True)

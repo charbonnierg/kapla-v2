@@ -112,6 +112,14 @@ def set_add_parser(parser: ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", default=False)
 
 
+def set_docker_parser(parser: ArgumentParser) -> None:
+    parser.add_argument("--tag", required=False, default=None)
+    parser.add_argument("--load", action="store_true", default=False)
+    parser.add_argument("--push", action="store_true", default=False)
+    parser.add_argument("--output-dir", "-o", required=False, default=None)
+    parser.add_argument("--no-build-dist", action="store_true", default=False)
+
+
 def set_project_parser(
     parser: _SubParsersAction[ArgumentParser], parent: ArgumentParser
 ) -> None:
@@ -140,6 +148,31 @@ def set_project_parser(
 
     new_parser = project_actions_subparser.add_parser("new", parents=[parent])
     set_new_parser(new_parser)
+
+    docker_parser = project_actions_subparser.add_parser("docker", parents=[parent])
+    set_docker_parser(docker_parser)
+
+
+def do_build_docker(args: Any) -> None:
+    tag: Optional[str] = args.tag
+    load: bool = args.load
+    push: bool = args.push
+    output_dir: Optional[str] = args.output_dir
+    no_build_dist: bool = args.no_build_dist
+
+    repo = KRepo.find_current()
+    project = repo.find_current_project()
+
+    docker_func = partial(
+        project.build_docker,
+        tag=tag,
+        load=load,
+        push=push,
+        output_dir=output_dir,
+        build_dist=False if no_build_dist else True,
+    )
+
+    run(docker_func)
 
 
 def do_remove_dependency(args: Any) -> None:

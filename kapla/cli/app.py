@@ -9,6 +9,7 @@ from .build import do_build, set_build_parser
 from .install import do_install, set_install_parser
 from .project import (
     do_add_dependency,
+    do_build_docker,
     do_build_project,
     do_create_new_project,
     do_install_project,
@@ -59,17 +60,27 @@ def app() -> None:
             do_ensure_venv(args)
 
     elif args.command == "project":
+
         if args.action == "show":
             do_show_dependencies(args)
+
         elif args.action == "write":
             do_write_project(args)
+
         elif args.action == "build":
             do_build_project(args)
+
         elif args.action == "install":
             do_install_project(args)
+
         elif args.action == "remove":
             do_remove_dependency(args)
+
         elif args.action == "add":
             do_add_dependency(args)
+
         elif args.action == "new":
             do_create_new_project(args)
+
+        elif args.action == "docker":
+            do_build_docker(args)

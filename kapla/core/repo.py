@@ -21,7 +21,7 @@ from typing import (
 from anyio import create_task_group
 
 from kapla.specs.pyproject import Dependency, Group
-from kapla.specs.repo import ProjectDependencies, KRepoSpec
+from kapla.specs.repo import KRepoSpec, ProjectDependencies
 
 from .cmd import Command, echo, get_deadline
 from .errors import KProjectNotFoundError
@@ -582,6 +582,9 @@ class KRepo(BaseKRepo):
         deadline = get_deadline(timeout, deadline)
         # Create a variable which will hold results for this round of projects
         results: List[Command] = []
+        # Make sure dist directory exists
+        dist_root = Path(self.root, "dist")
+        dist_root.mkdir(exist_ok=True, parents=False)
         # Create a task group to coordinate installs
         async with create_task_group() as tg:
             # Iterate over synchronous sequences
@@ -604,6 +607,10 @@ class KRepo(BaseKRepo):
                     results.append(cmd)
                     if cmd.code == 0:
                         print(f"Sucessfully built {project.name}")
+                        # Copy wheel only
+                        await self.run(
+                            f"cp dist/*.whl {dist_root.as_posix()}", cwd=project.root
+                        )
                     else:
                         print(f"Failed to build {project.name}")
 

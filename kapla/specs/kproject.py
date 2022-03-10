@@ -13,6 +13,7 @@ class DockerSpec(AliasedModel):
     platforms: List[str] = ["linux/amd64"]
     context: str = "./"
     labels: List[str] = []
+    build_args: Optional[Dict[str, str]] = None
 
 
 class KProjectSpec(BasePythonConfig):
