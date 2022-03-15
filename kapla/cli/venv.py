@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from anyio import run
 
-from kapla.core.repo import KRepo
+from kapla.projects.krepo import KRepo
 
 
 def set_venv_parser(
@@ -20,7 +20,7 @@ def do_venv_update(args: Optional[Any] = None) -> None:
     # Find repo
     repo = KRepo.find_current()
     # Update venv
-    run(repo.venv)
+    run(repo.update_venv)
 
 
 def do_ensure_venv(args: Optional[Any] = None) -> None:

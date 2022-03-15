@@ -4,6 +4,7 @@ import argparse
 
 from kapla.cli.licenses import do_show_licenses, set_licenses_parser
 from kapla.cli.list import do_list_projects, set_list_parser
+from kapla.cli.repair import do_repair, set_repair_parser
 
 from .build import do_build, set_build_parser
 from .install import do_install, set_install_parser
@@ -32,6 +33,7 @@ set_build_parser(command_subparser, parent=parent_parser)
 set_project_parser(command_subparser, parent=parent_parser)
 set_list_parser(command_subparser, parent=parent_parser)
 set_licenses_parser(command_subparser, parent=parent_parser)
+set_repair_parser(command_subparser, parent=parent_parser)
 
 
 def app() -> None:
@@ -43,6 +45,9 @@ def app() -> None:
 
     elif args.command == "build":
         do_build(args)
+
+    elif args.command == "repair":
+        do_repair(args)
 
     elif args.command == "list":
         do_list_projects(args)

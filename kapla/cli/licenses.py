@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser, _SubParsersAction
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Set, Tuple
 
 import pkg_resources
 from rich.console import Console
 from rich.table import Table
 
-from kapla.core.repo import KRepo
+from kapla.projects.krepo import KRepo
 
 
 def get_pkg_license(pkg: pkg_resources.Distribution) -> Tuple[str, str]:
@@ -36,7 +36,9 @@ class LicensesTable(Table):
             "Project URL",
             title="Dependencies licenses",
         )
-        for dep in repo.packages_lock:
+        rows: List[Tuple[str, str, str, str]] = []
+        visisted: Set[str] = set()
+        for dep in repo.packages_lock.packages:
             if dep in repo.projects:
                 continue
             if dep == "python":
@@ -44,21 +46,33 @@ class LicensesTable(Table):
             try:
                 dists = pkg_resources.require(dep)
             except pkg_resources.DistributionNotFound:
-                table.add_row(
-                    dep,
-                    repo.packages_lock.get(dep, {}).get("version", "  ?  "),
-                    "  ?  ",
-                    "  ?  ",
+                locked_version = repo.get_locked_version(dep)
+                rows.append(
+                    (
+                        dep,
+                        locked_version,
+                        "  ?  ",
+                        "  ?  ",
+                    )
                 )
+                visisted.add(dep)
                 continue
             for dist in dists:
+                dep = dist.project_name
+                if dep in visisted:
+                    continue
                 license, url = get_pkg_license(dist)
-                table.add_row(
-                    dist.project_name,
-                    dist.version,
-                    license,
-                    url,
+                rows.append(
+                    (
+                        dep,
+                        dist.version,
+                        license,
+                        url,
+                    )
                 )
+                visisted.add(dep)
+        for row in sorted(rows, key=lambda v: v[0].lower()):
+            table.add_row(*row)
         return table
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from shutil import which
@@ -7,69 +8,75 @@ from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVa
 
 from pydantic import BaseModel
 
+from ..wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
 from .cmd import Command, check_command, run_command
 from .finder import DEFAULT_GITIGNORE, find_files
+
+IS_WINDOWS = os.name == "rt"
+
 
 SpecT = TypeVar("SpecT", bound=BaseModel)
 
 
 class BaseProject(Generic[SpecT]):
-    """Base class for kapla project"""
+    """Base class for both kapla project and pyproject"""
 
     __SPEC__: Type[SpecT]
 
     def __init_subclass__(
         cls, spec: Optional[Type[BaseModel]] = None, **kwargs: Any
     ) -> None:
+        """Initialize child class.
+
+        This function is not when new class is defined (not instances).
+        """
         super().__init_subclass__(**kwargs)
         if spec:
+            # Store spec parameter into __SPEC__ attribute of child class
+            # This attribute will be available to all instances of child classes
             cls.__SPEC__ = spec
 
-    def __init__(self, filepath: Union[str, Path]) -> None:
-        """Project instances are created using a filepath"""
+    def __init__(self, filepath: Union[str, Path]):
+        """Create a new instance of BaseProject.
+
+        Projects are initialized using a filepath.
+        """
         super().__init__()
         # Save filepath
         self.filepath = Path(filepath)
+        # Check that filepath exists
         if not self.filepath.exists():
             raise FileNotFoundError(f"File does not exist: {filepath}")
         # Save project root directory
         self.root = self.filepath.parent
-        # Read content
+        # Read raw content of spec
         self._raw = self.read(self.filepath)
-        # Read specs
+        # Parse spec
         self._spec = self.__SPEC__.parse_obj(self._raw)
 
     def __getitem__(self, key: str) -> Any:
+        """Get a property from the raw spec. Mostly used to overwrite spec."""
         return self._raw[key]
 
     def __iter__(self) -> Iterator[str]:
+        """Iterate over raw spec fields"""
         return iter(self._raw)
 
     def __len__(self) -> int:
+        """Number of fields in raw spec"""
         return len(self._raw)
 
     @property
     def spec(self) -> SpecT:
-        """The project specs"""
+        """The parsed project spec. Spec is guaranteed to be a valid spec."""
         return self._spec
 
     @property
-    def venv_path(self) -> Path:
-        return self.root / ".venv"
-
-    @property
-    def python_executable(self) -> str:
-        for python_exec in find_files(
-            pattern=("python", "python.exe"),
-            root=self.venv_path,
-            ignore=["include", "Include", "lib", "Lib", "share", "doc"],
-        ):
-            return python_exec.as_posix()
-        raise FileNotFoundError("No virtual environment found for this project")
-
-    @property
     def gitignore(self) -> List[str]:
-        """Constant value at the moment. We should parse project gitignore in the future"""
+        """Constant value at the moment. We should parse project gitignore in the future.
+
+        FIXME: Support reading gitignore from project
+        """
         return DEFAULT_GITIGNORE
 
     def get_property(self, key: str, raw: bool = False) -> Any:
@@ -100,10 +107,10 @@ class BaseProject(Generic[SpecT]):
         return obj
 
     def refresh(self) -> None:
-        """Refresh project specs"""
-        # Read content
+        """Refresh project spec, I.E, read and parse spec from file."""
+        # Read raw spec
         self._raw = self.read(self.filepath)
-        # Read specs
+        # Update parsed spec
         self._spec = self.__SPEC__.parse_obj(self._raw)
 
     def read(self, path: Union[str, Path]) -> Any:
@@ -114,12 +121,63 @@ class BaseProject(Generic[SpecT]):
         """Write project specs into file"""
         raise NotImplementedError("write method must be overriden in child class")
 
+    async def get_git_commit(self) -> Optional[str]:
+        """Get current git commit sha"""
+        return await get_commit(self.root)
+
+    async def get_git_branch(self) -> Optional[str]:
+        """Get current git branch name"""
+        return await get_branch(self.root)
+
+    async def get_git_tag(self) -> Optional[str]:
+        """Get current git tag name"""
+        return await get_tag(self.root)
+
+    async def get_git_infos(self) -> GitInfos:
+        """Ge git infos from project (include commit, branch and tag)"""
+        return await get_infos(self.root)
+
+
+class BasePythonProject(BaseProject[SpecT]):
+
+    _python_executable: Path
+
+    @property
+    def venv_path(self) -> Path:
+        """Return path to virtualenv root directory"""
+        return self.root / ".venv"
+
+    @property
+    def venv_bin(self) -> Path:
+        """Return path to virtualenv bin directory"""
+        if IS_WINDOWS:
+            return self.venv_path / "Scripts"
+        else:
+            return self.venv_path / "bin"
+
+    @property
+    def python_executable(self) -> str:
+        """Path to python executable associated with the project."""
+        try:
+            return self._python_executable.as_posix()
+        except AttributeError:
+            for python_exec in find_files(
+                pattern="python.exe" if IS_WINDOWS else "python",
+                root=self.venv_path,
+                ignore=["include", "Include", "lib", "Lib", "share", "doc"],
+            ):
+                self._python_executable = python_exec
+                return self._python_executable.as_posix()
+        raise FileNotFoundError("No virtual environment found for this project")
+
     async def run_module(
         self,
         *module: str,
+        rc: Optional[int] = None,
+        quiet: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
-        rc: Optional[int] = 0,
+        **kwargs: Any,
     ) -> Command:
         """Uninstall a package using pip but does not remove package as dependency"""
         return await run_command(
@@ -127,73 +185,22 @@ class BaseProject(Generic[SpecT]):
             timeout=timeout,
             deadline=deadline,
             rc=rc,
+            quiet=quiet,
+            **kwargs,
         )
 
-    async def pip_install(
-        self,
-        *packages: str,
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-        raise_on_error: bool = False,
-    ) -> Command:
-        """Install a package using pip but does not add package as dependency"""
-        return await self.run_module(
-            "pip",
-            "install",
-            *packages,
-            timeout=timeout,
-            deadline=deadline,
-            rc=0 if raise_on_error else None,
-        )
-
-    async def pip_remove(
-        self,
-        *packages: str,
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-        raise_on_error: bool = False,
-    ) -> Command:
-        """Uninstall a package using pip but does not remove package as dependency"""
-        return await self.run_module(
-            "pip",
-            "uninstall",
-            "-y",
-            *packages,
-            timeout=timeout,
-            deadline=deadline,
-            rc=0 if raise_on_error else None,
-        )
-
-    async def update_pip_toolkit(
-        self,
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-        raise_on_error: bool = False,
-    ) -> None:
-        """Update pip, setuptools and wheel to their latest versions"""
-        await self.pip_install(
-            "-U",
-            "pip",
-            "setuptools",
-            "wheel",
-            timeout=timeout,
-            deadline=deadline,
-            raise_on_error=raise_on_error,
-        )
-
-    async def run(
+    async def run_cmd(
         self,
         cmd: Union[str, List[str]],
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
         env: Optional[Mapping[str, str]] = None,
         rc: Optional[int] = None,
+        quiet: bool = False,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
         **kwargs: Any,
     ) -> Command:
         """Run a command with poetry environment"""
-        venv_bin = Path(self.python_executable).parent
-        venv_path = venv_bin.parent
-        environment = {"VIRTUAL_ENV": venv_path.as_posix()}
+        environment = {"VIRTUAL_ENV": self.venv_path.as_posix()}
         if env:
             environment.update(env)
         return await run_command(
@@ -201,48 +208,153 @@ class BaseProject(Generic[SpecT]):
             timeout=timeout,
             deadline=deadline,
             env=environment,
-            append_path=venv_bin,
+            append_path=self.venv_path / "bin",
             rc=rc,
+            quiet=quiet,
             **kwargs,
         )
 
-    async def venv(
+    async def pip_install(
         self,
-        name: str = ".venv",
+        *packages: str,
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Command:
+        """Install a package using pip but does not add package as dependency"""
+        kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
+        return await self.run_module(
+            "pip",
+            "install",
+            *packages,
+            quiet=quiet,
+            timeout=timeout,
+            deadline=deadline,
+            **kwargs,
+        )
+
+    async def pip_update(
+        self,
+        *packages: str,
+        quiet: bool = False,
+        raise_on_error: bool = False,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Command:
+        """Install a package using pip but does not add package as dependency"""
+        kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
+        return await self.run_module(
+            "pip",
+            "install",
+            "-U",
+            *packages,
+            quiet=quiet,
+            timeout=timeout,
+            deadline=deadline,
+            **kwargs,
+        )
+
+    async def pip_remove(
+        self,
+        *packages: str,
+        raise_on_error: bool = False,
+        quiet: bool = False,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Command:
+        """Uninstall a package using pip but does not remove package as dependency"""
+        kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
+        return await self.run_module(
+            "pip",
+            "uninstall",
+            "-y",
+            *packages,
+            quiet=quiet,
+            timeout=timeout,
+            deadline=deadline,
+            **kwargs,
+        )
+
+    async def update_pip_toolkit(
+        self,
+        quiet: bool = False,
+        raise_on_error: bool = False,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Update pip, setuptools and wheel to their latest versions"""
+        await self.pip_update(
+            "pip",
+            "setuptools",
+            "wheel",
+            quiet=quiet,
+            raise_on_error=raise_on_error,
+            timeout=timeout,
+            deadline=deadline,
+            **kwargs,
+        )
+
+    async def update_venv(
+        self,
+        quiet: bool = False,
+        raise_on_error: bool = False,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
+        **kwargs: Any,
     ) -> Path:
         """Ensure venv is created within project"""
-        venv_root = self.root / name
+        kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
         # by default use python3
         python = "python3"
         # Check if it exist though
         if which(python) is None:
             # And fallback to "python" if not (windows users here you go)
             python = "python"
-        done_cmd = await check_command(
-            [python, "-m", "venv", name],
-            cwd=self.root,
+        # Create virtual environment
+        await check_command(
+            [python, "-m", "venv", self.venv_path.name],
+            cwd=self.venv_path.parent,
             timeout=timeout,
             deadline=deadline,
+            quiet=quiet,
+            **kwargs,
         )
         # Update pip using executable
-        await self.update_pip_toolkit(deadline=done_cmd.deadline)
+        await self.pip_update(
+            "pip",
+            "setuptools",
+            "wheel",
+            timeout=timeout,
+            deadline=deadline,
+            quiet=quiet,
+            **kwargs,
+        )
         # Return path to venv
-        return venv_root
+        return self.venv_path
 
     async def ensure_venv(
         self,
-        name: str = ".venv",
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
+        **kwargs: Any,
     ) -> None:
         """Ensure virtual environment exists"""
-        if not Path(self.root / name).exists():
-            await self.venv(name, timeout=timeout, deadline=deadline)
+        if not self.venv_path.exists():
+            await self.update_venv(
+                quiet=quiet,
+                raise_on_error=raise_on_error,
+                timeout=timeout,
+                deadline=deadline,
+                **kwargs,
+            )
 
-    def remove_venv(
-        self,
-        name: str = ".venv",
-    ) -> None:
-        shutil.rmtree(Path(self.root, name), ignore_errors=True)
+    def remove_venv(self) -> None:
+        """Remove virtual environment"""
+        shutil.rmtree(self.venv_path, ignore_errors=True)

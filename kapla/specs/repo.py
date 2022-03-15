@@ -30,4 +30,4 @@ class ProjectDependencies(AliasedModel):
     repo_groups: Dict[str, Group] = {}
     dependencies: Dict[str, Dependency] = {}
     groups: Dict[str, Group] = {}
-    python: str
+    python: Dependency

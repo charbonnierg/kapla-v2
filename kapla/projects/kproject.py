@@ -14,13 +14,11 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    TypeVar,
     Union,
 )
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from kapla.core.git import get_git_infos
 from kapla.specs.common import BuildSystem
 from kapla.specs.kproject import KProjectSpec
 from kapla.specs.pyproject import (
@@ -31,23 +29,31 @@ from kapla.specs.pyproject import (
     PyProjectSpec,
 )
 
-from .base import BaseProject
-from .cmd import Command, get_deadline
-from .errors import CommandFailedError
-from .finder import find_dirs, find_files
-from .io import load_yaml, write_toml, write_yaml
-from .logger import logger
+from ..core.base import BasePythonProject
+from ..core.cmd import Command, get_deadline
+from ..core.errors import CommandFailedError
+from ..core.finder import find_dirs, find_files
+from ..core.io import load_yaml, write_toml, write_yaml
+from ..core.logger import logger
 from .pyproject import KPyProject
 
 if TYPE_CHECKING:
-    from .repo import KRepo
+    from .krepo import KRepo
 
 
-SpecT = TypeVar("SpecT", bound=BaseModel)
-ProjectT = TypeVar("ProjectT", bound="BaseKProject")
+class ReadWriteYAMLMixin:
+    _raw: Any
+
+    def read(self, path: Union[str, Path]) -> Any:
+        """Read YAML project specs"""
+        return load_yaml(path)
+
+    def write(self, path: Union[str, Path]) -> Path:
+        """Write YAML project specs"""
+        return write_yaml(self._raw, path)
 
 
-class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
+class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjectSpec):
     """Base class for pyproject files implementing read and write operations"""
 
     def __init__(
@@ -61,18 +67,22 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
         self.workspace = workspace
 
     @property
+    def venv_path(self) -> Path:
+        """Get path to virtual environment of the project"""
+        if self.repo:
+            return self.repo.venv_path
+        return super().venv_path
+
+    @property
     def gitignore(self) -> List[str]:
+        """Constant value at the moment. We should parse project gitignore in the future.
+
+        FIXME: Support reading gitignore from project
+        """
         if self.repo:
             return self.repo.gitignore
         else:
             return super().gitignore
-
-    @property
-    def venv_path(self) -> Path:
-        if self.repo:
-            return self.repo.venv_path
-        else:
-            return super().venv_path
 
     @property
     def pyproject_path(self) -> Path:
@@ -93,13 +103,46 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
         """The project version"""
         return self.spec.version
 
-    def read(self, path: Union[str, Path]) -> Any:
-        """Read YAML project specs"""
-        return load_yaml(path)
+    def is_already_installed(self) -> bool:
+        if self.repo:
+            for _ in find_files(
+                f"{self.name.replace('-','_').lower()}.pth",
+                root=self.venv_path,
+                ignore=[
+                    "bin/",
+                    "Scripts/",
+                    "include",
+                    "Include",
+                    "share",
+                    "doc",
+                    "etc",
+                ],
+            ):
+                return True
+        return False
 
-    def write(self, path: Union[str, Path]) -> Path:
-        """Write YAML project specs"""
-        return write_yaml(self._raw, path)
+    def get_dependencies_names(self, include_extras: bool = True) -> List[str]:
+        """Get a list of dependencies names"""
+        names: Set[str] = set()
+        for dep in self.spec.dependencies:
+            if isinstance(dep, str):
+                names.add(dep)
+            else:
+                for name in dep:
+                    names.add(name)
+        if include_extras:
+            for extra_deps in self.spec.extras.values():
+                for dep in extra_deps:
+                    if isinstance(dep, str):
+                        names.add(dep)
+                    else:
+                        for name in dep:
+                            names.add(name)
+        return list(names)
+
+    def get_local_dependencies_names(self) -> List[str]:
+        """Get local dependencies names (include all groups)"""
+        return list(self.get_local_dependencies())
 
     def get_local_dependencies(self) -> Dict[str, Dependency]:
         """Get a dict holding local dependencies of project"""
@@ -134,24 +177,18 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
         dependencies: Dict[str, Dependency] = {}
         groups: Dict[str, Group] = {}
         extras: Dict[str, List[str]] = {}
-        if self.repo is None:
-            lock = {}
-        else:
-            lock = self.repo.packages_lock
         # Iterate over dependencies and replace version
         for dep in self.spec.dependencies:
             if isinstance(dep, str):
-                dependencies[dep] = Dependency.parse_obj(
-                    {"version": lock.get(dep.lower(), {"version": "*"})["version"]}
-                )
+                locked_version = self.get_locked_version(dep)
+                dependencies[dep] = Dependency(version=locked_version)
             else:
                 for key, value in dep.items():
+                    locked_version = self.get_locked_version(key)
                     dependencies[key] = Dependency.parse_obj(
                         {
                             **value.dict(exclude_unset=True, by_alias=True),
-                            "version": lock.get(key.lower(), {"version": "*"})[
-                                "version"
-                            ],
+                            "version": locked_version,
                         }
                     )
         # Iterate over extra dependencies and replace version
@@ -162,9 +199,10 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
             # Iterate over dependencies and replace version
             for dep in group_dependencies:
                 if isinstance(dep, str):
+                    locked_version = self.get_locked_version(dep)
                     # Add dependency to group
-                    groups[group_name].dependencies[dep] = Dependency.parse_obj(
-                        {"version": lock.get(dep, {"version": "*"})["version"]}
+                    groups[group_name].dependencies[dep] = Dependency(
+                        version=locked_version
                     )
                     # Add dependency to extra
                     if dep not in extras[group_name]:
@@ -173,17 +211,18 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
                     if dep not in dependencies:
                         dependencies[dep] = Dependency.parse_obj(
                             {
-                                "version": lock.get(dep, {"version": "*"})["version"],
+                                "version": locked_version,
                                 "optional": True,
                             }
                         )
                 else:
                     for key, value in dep.items():
+                        locked_version = self.get_locked_version(key)
                         # Add dependency to group
                         groups[group_name].dependencies[key] = Dependency.parse_obj(
                             {
                                 **value.dict(exclude_unset=True, by_alias=True),
-                                "version": lock.get(key, {"version": "*"})["version"],
+                                "version": locked_version,
                             }
                         )
                         # Add dependency to extra
@@ -194,16 +233,17 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
                             dependencies[key] = Dependency.parse_obj(
                                 {
                                     **value.dict(exclude_unset=True, by_alias=True),
-                                    "version": lock.get(key, {"version": "*"})[
-                                        "version"
-                                    ],
+                                    "version": locked_version,
                                     "optional": True,
                                 }
                             )
         # Make sure python dependency is set
         if include_python:
             if "python" not in dependencies:
-                dependencies["python"] = lock.get("python", ">=3.8,<4")
+                if self.repo:
+                    python_dep = self.repo.get_dependency("python")
+                    if python_dep:
+                        dependencies["python"] = python_dep.copy()
         else:
             dependencies.pop("python", None)
         # Remove local deps
@@ -218,12 +258,13 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
     ) -> Tuple[Dict[str, Dependency], Dict[str, List[str]], Dict[str, Group]]:
         dependencies, extras, groups = self.get_build_dependencies()
         local_dependencies = self.get_local_dependencies()
-        # Iterate a second time on dependencies to apply dep overrides
+
+        # Iterate on dependencies to apply local deps overrides
         for name in dependencies:
             if name in local_dependencies:
                 dependencies[name] = local_dependencies[name]
 
-        # Iterate a second time on groups
+        # Iterate on groups to apply local deps overrides
         for group_name, group in groups.items():
             # Iterate on each group dependencies
             for name in group.dependencies:
@@ -232,26 +273,11 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
 
         return dependencies, extras, groups
 
-    def get_dependencies_names(self) -> List[str]:
-        names: Set[str] = set()
-        for dep in self.spec.dependencies:
-            if isinstance(dep, str):
-                names.add(dep)
-            else:
-                for name in dep:
-                    names.add(name)
-        for extra_deps in self.spec.extras.values():
-            for dep in extra_deps:
-                if isinstance(dep, str):
-                    names.add(dep)
-                else:
-                    for name in dep:
-                        names.add(name)
-        return list(names)
-
-    def get_local_dependencies_names(self) -> List[str]:
-        """Get local dependencies names (include all groups)"""
-        return list(self.get_local_dependencies())
+    def get_locked_version(self, package: str) -> str:
+        if self.repo:
+            return self.repo.get_locked_version(package)
+        else:
+            return "*"
 
     def get_pyproject_spec(
         self, develop: bool = False, build_system: BuildSystem = DEFAULT_BUILD_SYSTEM
@@ -290,17 +316,42 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
         spec = self.get_pyproject_spec(develop=develop, build_system=build_system)
         pyproject_path = Path(path) if path else self.pyproject_path
         content = spec.dict()
+        # Create an inline table to have more readable pyprojects
+        if spec.tool.poetry.dependencies:
+            content["tool"]["poetry"][
+                "dependencies"
+            ] = KPyProject._create_inline_tables(
+                content["tool"]["poetry"]["dependencies"]
+            )
+        # Ensure python dependency is a string
+        if "python" in content["tool"]["poetry"]["dependencies"]:
+            content["tool"]["poetry"]["dependencies"]["python"] = content["tool"][
+                "poetry"
+            ]["dependencies"]["python"]["version"]
+        # Write pyproject.toml as file
         write_toml(content, pyproject_path)
         try:
+            # Parse pyproject we just wrote so that we're sure it is valid
             pyproject = KPyProject(pyproject_path, repo=self.repo)
         except ValidationError as err:
-            logger.error("Failed to validate", exc_info=err)
+            logger.error(
+                "Failed to validate pyproject",
+                exc_info=err,
+                path=pyproject_path.as_posix(),
+            )
             raise
         return pyproject
 
+    def remove_pyproject(self, pyproject_path: Union[str, Path, None] = None) -> None:
+        """Remove auto-generated poetry files"""
+        pyproject_path = Path(pyproject_path) if pyproject_path else self.pyproject_path
+        pyproject_path.unlink(missing_ok=True)
+        lock_path = pyproject_path.parent / "poetry.lock"
+        lock_path.unlink(missing_ok=True)
+
     @contextmanager
     def temporary_pyproject(
-        self: ProjectT,
+        self,
         path: Union[str, Path, None] = None,
         develop: bool = False,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
@@ -314,48 +365,8 @@ class BaseKProject(BaseProject[KProjectSpec], spec=KProjectSpec):
             yield pyproject
         finally:
             if clean:
-                self.clean_poetry_files()
+                self.remove_pyproject()
 
-    def clean_poetry_files(self, pyproject_path: Union[str, Path, None] = None) -> None:
-        """Remove auto-generated poetry files"""
-        pyproject_path = Path(pyproject_path) if pyproject_path else self.pyproject_path
-        pyproject_path.unlink(missing_ok=True)
-        lock_path = pyproject_path.parent / "poetry.lock"
-        lock_path.unlink(missing_ok=True)
-
-    async def venv(
-        self,
-        name: str = ".venv",
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-    ) -> Path:
-        if self.repo:
-            return await self.repo.venv(name, timeout, deadline)
-        else:
-            return await super().venv(name, timeout, deadline)
-
-    async def ensure_venv(
-        self,
-        name: str = ".venv",
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-    ) -> None:
-        if self.repo:
-            return await self.repo.ensure_venv(name, timeout=timeout)
-        else:
-            return await super().ensure_venv(name, deadline=deadline)
-
-    def remove_venv(
-        self,
-        name: str = ".venv",
-    ) -> None:
-        if self.repo:
-            self.repo.remove_venv(name)
-        else:
-            super().remove_venv(name)
-
-
-class KProject(BaseKProject):
     async def show(
         self,
         exclude_groups: Union[List[str], str, None] = None,
@@ -365,20 +376,22 @@ class KProject(BaseKProject):
         tree: bool = False,
         latest: bool = False,
         outdated: bool = False,
+        clean: bool = True,
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
-        raise_on_error: bool = False,
-        clean: bool = True,
+        **kwargs: Any,
     ) -> Command:
         """Show project dependencies"""
         if not self.repo:
             with self.temporary_pyproject(
                 self.pyproject_path, develop=True, clean=clean
             ) as pyproject:
-                await pyproject.lock(
-                    echo_stdout=None, no_update=True, raise_on_error=True
+                await pyproject.poetry_lock(
+                    echo_stdout=None, no_update=True, raise_on_error=raise_on_error
                 )
-                return await pyproject.show(
+                return await pyproject.poetry_show(
                     exclude_groups=exclude_groups,
                     include_groups=include_groups,
                     only_groups=only_groups,
@@ -386,23 +399,25 @@ class KProject(BaseKProject):
                     tree=tree,
                     latest=latest,
                     outdated=outdated,
+                    quiet=quiet,
+                    raise_on_error=raise_on_error,
                     timeout=timeout,
                     deadline=deadline,
-                    raise_on_error=raise_on_error,
+                    **kwargs,
                 )
         else:
             try:
-                for project in self.repo.get_projects_stack(
+                for project in self.repo.list_projects(
                     self.get_local_dependencies_names()
                 ):
                     project.write_pyproject(develop=True)
                 # Write pyproject
                 pyproject = self.write_pyproject(develop=True)
                 # Lock and show deps
-                await pyproject.lock(
-                    echo_stdout=None, no_update=True, raise_on_error=False
+                await pyproject.poetry_lock(
+                    echo_stdout=None, no_update=True, raise_on_error=raise_on_error
                 )
-                return await pyproject.show(
+                return await pyproject.poetry_show(
                     exclude_groups=exclude_groups,
                     include_groups=include_groups,
                     only_groups=only_groups,
@@ -410,9 +425,11 @@ class KProject(BaseKProject):
                     tree=tree,
                     latest=latest,
                     outdated=outdated,
+                    quiet=quiet,
+                    raise_on_error=raise_on_error,
                     timeout=timeout,
                     deadline=deadline,
-                    raise_on_error=False,
+                    **kwargs,
                 )
             finally:
                 self.repo.clean_pyproject_files()
@@ -421,41 +438,54 @@ class KProject(BaseKProject):
         self,
         env: Optional[Mapping[str, Any]] = None,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        clean: bool = True,
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
-        raise_on_error: bool = False,
-        clean: bool = True,
+        **kwargs: Any,
     ) -> Command:
         with self.temporary_pyproject(
             self.pyproject_path, develop=False, build_system=build_system, clean=clean
         ) as pyproject:
-            print(f"Starting build for {self.name}")
-            return await pyproject.build(
+            return await pyproject.poetry_build(
                 env=env,
+                quiet=quiet,
+                raise_on_error=raise_on_error,
                 timeout=timeout,
                 deadline=deadline,
-                raise_on_error=raise_on_error,
+                **kwargs,
             )
 
-    def should_skip_install(self) -> bool:
-        if self.repo:
-            for _ in find_files(
-                f"{self.name.replace('-','_').lower()}.pth",
-                root=self.venv_path,
-                ignore=[
-                    "bin/",
-                    "Scripts/",
-                    "include",
-                    "Include",
-                    "share",
-                    "doc",
-                    "etc",
-                ],
-            ):
-                return True
-        return False
-
     async def install(
+        self,
+        exclude_groups: Union[Iterable[str], str, None] = None,
+        include_groups: Union[Iterable[str], str, None] = None,
+        only_groups: Union[Iterable[str], str, None] = None,
+        default: bool = False,
+        build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        clean: bool = True,
+        quiet: bool = False,
+        raise_on_error: bool = False,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Optional[Command]:
+        return await self.pep_660_install(
+            exclude_groups=exclude_groups,
+            include_groups=include_groups,
+            only_groups=only_groups,
+            default=default,
+            build_system=build_system,
+            clean=clean,
+            quiet=quiet,
+            raise_on_error=raise_on_error,
+            timeout=timeout,
+            deadline=deadline,
+            **kwargs,
+        )
+
+    async def poetry_install(
         self,
         exclude_groups: Union[Iterable[str], str, None] = None,
         include_groups: Union[Iterable[str], str, None] = None,
@@ -466,20 +496,21 @@ class KProject(BaseKProject):
         dry_run: bool = False,
         extras: Union[Iterable[str], str, None] = None,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        clean: bool = True,
+        quiet: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
         raise_on_error: bool = False,
-        clean: bool = True,
+        **kwargs: Any,
     ) -> Optional[Command]:
-        if self.should_skip_install():
-            return None
+        """Install project using poetry (not recommended, use `KProject.pep_660_install()` instead)"""
         with self.temporary_pyproject(
             self.pyproject_path,
             clean=clean,
             develop=True,
             build_system=build_system,
         ) as pyproject:
-            return await pyproject.install(
+            return await pyproject.poetry_install(
                 exclude_groups=exclude_groups,
                 include_groups=include_groups,
                 only_groups=only_groups,
@@ -488,28 +519,32 @@ class KProject(BaseKProject):
                 no_root=no_root,
                 dry_run=dry_run,
                 extras=extras,
+                quiet=quiet,
+                raise_on_error=raise_on_error,
                 timeout=timeout,
                 deadline=deadline,
-                raise_on_error=raise_on_error,
+                **kwargs,
             )
 
-    async def install_pep_660(
+    async def pep_660_install(
         self,
         exclude_groups: Union[Iterable[str], str, None] = None,
         include_groups: Union[Iterable[str], str, None] = None,
         only_groups: Union[Iterable[str], str, None] = None,
         default: bool = False,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        clean: bool = True,
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
-        raise_on_error: bool = False,
-        clean: bool = True,
+        **kwargs: Any,
     ) -> Optional[Command]:
         if not self.repo:
             raise NotImplementedError(
                 "PEP 660 install is not supported without parent repo"
             )
-        if self.should_skip_install():
+        if self.is_already_installed():
             return None
         groups = list(self.spec.extras)
         if default:
@@ -533,29 +568,14 @@ class KProject(BaseKProject):
             return await self.repo.pip_install(
                 "-e",
                 target,
+                quiet=quiet,
+                raise_on_error=raise_on_error,
                 timeout=timeout,
                 deadline=deadline,
-                raise_on_error=raise_on_error,
+                **kwargs,
             )
 
-    def clean(self) -> None:
-        """Remove well-known non versioned files"""
-        # Remove venv
-        shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
-        # Remove directories
-        for path in find_dirs(
-            self.gitignore,
-            self.root,
-        ):
-            shutil.rmtree(path, ignore_errors=True)
-        # Remove files
-        for path in find_files(
-            self.gitignore,
-            root=self.root,
-        ):
-            path.unlink(missing_ok=True)
-
-    async def add(
+    async def add_dependency(
         self,
         package: str,
         group: Optional[str] = None,
@@ -568,8 +588,11 @@ class KProject(BaseKProject):
         allow_prereleases: bool = False,
         dry_run: bool = False,
         lock: bool = False,
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
+        **kwargs: Any,
     ) -> Dict[str, Union[str, Dependency]]:
         if group:
             repo_group = self.name + "--" + group
@@ -577,7 +600,7 @@ class KProject(BaseKProject):
             repo_group = self.name
         if self.repo:
             group_before = self.repo.spec.tool.poetry.group.get(repo_group, Group())
-            await self.repo.add(
+            await self.repo.poetry_add(
                 package=package,
                 group=repo_group,
                 editable=editable,
@@ -589,9 +612,11 @@ class KProject(BaseKProject):
                 allow_prereleases=allow_prereleases,
                 dry_run=dry_run,
                 lock=lock,
+                quiet=quiet,
+                raise_on_error=raise_on_error,
                 timeout=timeout,
                 deadline=deadline,
-                raise_on_error=True,
+                **kwargs,
             )
             # Refresh repo metadata
             self.repo.refresh()
@@ -600,7 +625,18 @@ class KProject(BaseKProject):
             new_packages = set(group_after.dependencies).difference(
                 group_before.dependencies
             )
-            # FIXME: Write new deps in YAML proejct
+            # Add new packages to project.yml raw spec
+            if group is None:
+                for package in new_packages:
+                    self._raw["dependencies"].append(package)
+            else:
+                if group not in self._raw["extras"]:
+                    self._raw["extras"][group] = []
+                for package in new_packages:
+                    self._raw["extras"][group].append(package)
+            # Write spec
+            self.write(self.root / "project.yml")
+            self.refresh()
             # Return new packages
             return {name: group_after.dependencies[name] for name in new_packages}
 
@@ -609,13 +645,16 @@ class KProject(BaseKProject):
                 "It's not possible to add dependencies to projet without parent repo"
             )
 
-    async def remove(
+    async def remove_dependency(
         self,
         package: str,
         group: Optional[str] = None,
         dry_run: bool = False,
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
+        **kwargs: Any,
     ) -> Optional[Dict[str, Union[str, Dependency]]]:
         if group:
             repo_group = self.name + "--" + group
@@ -624,13 +663,15 @@ class KProject(BaseKProject):
         if self.repo:
             group_before = self.repo.spec.tool.poetry.group.get(repo_group, Group())
             try:
-                await self.repo.remove(
+                await self.repo.poetry_remove(
                     package,
                     group=repo_group,
                     dry_run=dry_run,
+                    quiet=quiet,
+                    raise_on_error=raise_on_error,
                     timeout=timeout,
                     deadline=deadline,
-                    raise_on_error=True,
+                    **kwargs,
                 )
             except CommandFailedError:
                 # Try to remove dep anyway
@@ -642,6 +683,24 @@ class KProject(BaseKProject):
             removed_packages = set(group_before.dependencies).difference(
                 group_after.dependencies
             )
+            # Remove package from project.yml
+            if group is None:
+                self._raw["dependencies"] = [
+                    dep
+                    for dep in self._raw["dependencies"]
+                    if dep not in removed_packages
+                ]
+            else:
+                if group in self._raw["extras"]:
+                    self._raw["extras"][group] = [
+                        dep
+                        for dep in self._raw["dependencies"][group]
+                        if dep not in removed_packages
+                    ]
+            # Write and refresh
+            if removed_packages:
+                self.write(self.root / "project.yml")
+                self.refresh()
             # Return removed packages
             return {name: group_before.dependencies[name] for name in removed_packages}
 
@@ -659,25 +718,31 @@ class KProject(BaseKProject):
         build_dist: bool = True,
         build_dist_env: Optional[Dict[str, str]] = None,
         build_dist_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        quiet: bool = False,
+        raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
+        **kwargs: Any,
     ) -> Command:
         """Build docker image for the projcet according to the project spec."""
         # Gather deadline
         deadline = get_deadline(timeout, deadline)
+        kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
         # Gather git infos
-        git_tag, git_branch, git_commit = await get_git_infos()
+        git_infos = await self.get_git_infos()
         # Gather tag
         if tag is None:
             # Check if it's a release
-            if git_tag:
-                tag = git_tag
+            if git_infos.tag:
+                tag = git_infos.tag
             # Use branch and commit if available
-            elif git_branch and git_commit:
-                tag = "-".join([git_branch.split("/")[-1].lower(), git_commit])
+            elif git_infos.branch and git_infos.commit:
+                tag = "-".join(
+                    [git_infos.branch.split("/")[-1].lower(), git_infos.commit]
+                )
             # Use commit only
-            elif git_commit:
-                tag = git_commit
+            elif git_infos.commit:
+                tag = git_infos.commit
             else:
                 tag = "latest"
         spec = self.spec.docker
@@ -690,7 +755,9 @@ class KProject(BaseKProject):
         template_path = self.repo.root / ".repo/templates/dockerfiles" / template_file
         try:
             shutil.copy2(template_path, self.root / "Dockerfile")
-            cmd = Command("docker buildx build", deadline=deadline)
+            cmd = Command(
+                "docker buildx build", deadline=deadline, quiet=quiet, **kwargs
+            )
             build_args = spec.build_args.copy() if spec.build_args else {}
             if spec.base_image and "BASE_IMAGE" not in build_args:
                 if ":" not in spec.base_image:
@@ -700,12 +767,12 @@ class KProject(BaseKProject):
                 build_args["BASE_IMAGE"] = base_image
             build_args["PACKAGE_NAME"] = self.name
             build_args["PACKAGE_VERSION"] = self.version
-            if git_commit:
-                build_args["GIT_COMMIT"] = git_commit
-            if git_branch:
-                build_args["GIT_BRANCH"] = git_branch
-            if git_tag:
-                build_args["GIT_TAG"] = git_tag
+            if git_infos.commit:
+                build_args["GIT_COMMIT"] = git_infos.commit
+            if git_infos.branch:
+                build_args["GIT_BRANCH"] = git_infos.branch
+            if git_infos.tag:
+                build_args["GIT_TAG"] = git_infos.tag
             # Add build args
             for key, value in build_args.items():
                 cmd.add_option("--build-arg", "=".join([key, value]), escape=True)
@@ -719,12 +786,12 @@ class KProject(BaseKProject):
                 ],
             )
             # Add git infos as labels
-            if git_tag:
-                cmd.add_option("--label", f"git.tag.name={git_tag}")
-            if git_branch:
-                cmd.add_option("--label", f"git.branch.name={git_branch}")
-            if git_commit:
-                cmd.add_option("--label", f"git.commit={git_commit}")
+            if git_infos.tag:
+                cmd.add_option("--label", f"git.tag.name={git_infos.tag}")
+            if git_infos.branch:
+                cmd.add_option("--label", f"git.branch.name={git_infos.branch}")
+            if git_infos.commit:
+                cmd.add_option("--label", f"git.commit={git_infos.commit}")
             # Add tag
             cmd.add_option("--tag", ":".join([spec.image, tag]))
             if load:
@@ -756,18 +823,36 @@ class KProject(BaseKProject):
                 await self.build(
                     env=build_dist_env,
                     build_system=build_dist_system,
+                    quiet=quiet,
                     deadline=deadline,
+                    **kwargs,
                 )
                 # Copy dist into project dist
                 dist_root = self.root / "dist"
                 dist_root.mkdir(exist_ok=True, parents=False)
-                for dep in self.repo.get_projects_stack(include=[self.name]):
+                for dep in self.repo.list_projects(include=[self.name]):
                     if dep.name == self.name:
                         continue
-                    await self.run(
-                        f"cp -f dist/*.whl {dist_root.as_posix()}", cwd=dep.root
-                    )
+                    for filepath in Path(dep.root, "dist").glob("*.whl"):
+                        shutil.copy2(filepath, dist_root)
             # Run docker build command
             return await cmd.run()
         finally:
             Path(self.root, "Dockerfile").unlink(missing_ok=True)
+
+    def clean(self) -> None:
+        """Remove well-known non versioned files"""
+        # Remove venv
+        shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
+        # Remove directories
+        for path in find_dirs(
+            self.gitignore,
+            self.root,
+        ):
+            shutil.rmtree(path, ignore_errors=True)
+        # Remove files
+        for path in find_files(
+            self.gitignore,
+            root=self.root,
+        ):
+            path.unlink(missing_ok=True)

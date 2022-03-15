@@ -6,7 +6,7 @@ from typing import Any, Optional, Tuple
 
 from anyio import run
 
-from kapla.core.repo import KRepo
+from kapla.projects.krepo import KRepo
 
 
 def set_install_parser(parser: _SubParsersAction[Any], parent: ArgumentParser) -> None:

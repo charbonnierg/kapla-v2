@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple, Union
 
 from anyio import run
 
-from kapla.core.repo import KRepo
+from kapla.projects.krepo import KRepo
 from kapla.specs.kproject import KProjectSpec
 
 
@@ -184,7 +184,7 @@ def do_remove_dependency(args: Any) -> None:
     project = repo.find_current_project()
 
     remove_func = partial(
-        project.remove,
+        project.remove_dependency,
         package=package,
         group=group,
         dry_run=dry_run,
@@ -209,7 +209,7 @@ def do_add_dependency(args: Any) -> None:
     project = repo.find_current_project()
 
     add_func = partial(
-        project.add,
+        project.add_dependency,
         package=package,
         group=group,
         editable=editable,

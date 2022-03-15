@@ -6,7 +6,7 @@ from typing import Any, List
 from rich.console import Console
 from rich.table import Table
 
-from kapla.core.repo import KRepo
+from kapla.projects.krepo import KRepo
 
 
 class ProjectsTable(Table):
@@ -22,7 +22,7 @@ class ProjectsTable(Table):
             "Apps",
             title=f"{repo.name} packages",
         )
-        for project in repo.projects_sequence:
+        for project in repo.list_projects():
             all_plugins = project.spec.plugins
             apps: List[str] = []
             for plugin_type, plugins in all_plugins.items():
@@ -31,7 +31,7 @@ class ProjectsTable(Table):
             table.add_row(
                 project.name,
                 project.version,
-                "✔" if project.should_skip_install() else "💥",
+                "✔" if project.is_already_installed() else "💥",
                 project.root.relative_to(repo.root).as_posix(),
                 ", ".join(project.spec.scripts),
                 ", ".join(apps),

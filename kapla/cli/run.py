@@ -6,7 +6,7 @@ from typing import Any
 
 from anyio import run
 
-from kapla.core.repo import KRepo
+from kapla.projects.krepo import KRepo
 
 
 def set_run_parser(parser: _SubParsersAction[Any], parent: ArgumentParser) -> None:
@@ -19,6 +19,6 @@ def do_run_cmd(args: Any) -> None:
     cmd = args.cmd
     # Find repo
     repo = KRepo.find_current()
-    run_cmd = partial(repo.run, cmd)
+    run_cmd = partial(repo.run_cmd, cmd)
     # Update run
     run(run_cmd)

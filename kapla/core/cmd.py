@@ -2,221 +2,510 @@ from __future__ import annotations
 
 import os
 import shlex
+import signal
 import sys
+from asyncio import iscoroutinefunction
 from contextlib import AsyncExitStack
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Iterable, List, Mapping, Optional, TextIO, Union
+from subprocess import PIPE
+from types import TracebackType
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Type,
+    Union,
+)
 
 from anyio import create_task_group, move_on_after, open_process
-from anyio._core._eventloop import get_asynclib
+from anyio.abc import Process
 from anyio.streams.text import TextReceiveStream
 
-from .errors import CommandCancelledError, CommandFailedError
+from .errors import CommandFailedError, CommandNotFoundError
 from .logger import logger
+from .timeout import get_deadline, get_event_loop_time, get_timeout
 
-
-def echo(text: str, file: TextIO = sys.stdout) -> None:
-    """Default function to handle text characters.
-
-    Note that this function does not process lines, but strings of arbitrary length which may or may not be whole lines.
-    That's why `end=""` is used.
-    """
-    print(text, file=file, end="")
-
-
-def current_clock_time() -> float:
-    """Get current clock time. Do not use as timestamp !"""
-    return get_asynclib().current_time()  # type: ignore[no-any-return]
-
-
-def get_deadline(
-    timeout: Optional[float] = None, deadline: Optional[float] = None
-) -> float:
-    return (
-        deadline
-        if deadline
-        else current_clock_time() + timeout
-        if timeout
-        else float("inf")
-    )
+STDOUT_SINK = partial(print, end="", sep="", file=sys.stdout)
+STDERR_SINK = partial(print, end="", sep="", file=sys.stderr)
 
 
 class Command:
+    """Run a command asynchronously using a context manager"""
+
     def __init__(
         self,
         cmd: Union[str, List[str]],
+        shell: Optional[bool] = None,
         cwd: Union[str, Path, None] = None,
         env: Optional[Mapping[str, str]] = None,
         append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
-        echo_stdout: Optional[Callable[[str], None]] = echo,
-        echo_stderr: Optional[Callable[[str], None]] = partial(echo, file=sys.stderr),
-        **kwargs: Any,
-    ) -> None:
-        """Run a command asynchronously using a context manager"""
-        self.cmd = cmd
-        self.cwd = Path(cwd) if cwd else Path.cwd()
-        self._deadline = deadline
-        self._timeout = timeout
-        self.echo_stdout = echo_stdout
-        self.echo_stderr = echo_stderr
+        stdin: int = PIPE,
+        stdout: int = PIPE,
+        stderr: int = PIPE,
+        start_new_session: bool = False,
+        stdout_sink: Union[
+            Callable[[str], None], Callable[[str], Coroutine[None, None, None]], None
+        ] = STDOUT_SINK,
+        stderr_sink: Union[
+            Callable[[str], None], Callable[[str], Coroutine[None, None, None]], None
+        ] = STDERR_SINK,
+        quiet: bool = False,
+        rc: Optional[int] = None,
+    ):
+        """Create a new command instance"""
+        cwd_path = Path(cwd) if cwd else Path.cwd()
+        self.cwd = cwd_path.resolve(True)
+        # Store private attributes
+        self._timeout = get_timeout(timeout, deadline)
+        self._deadline = get_deadline(timeout, deadline)
+        self._stdin = stdin
+        self._stdout = stdout
+        self._stderr = stderr
+        self._start_new_session = start_new_session
+        # Store command
+        if shell is None:
+            self._cmd = cmd
+        elif shell is True:
+            self._cmd = cmd if isinstance(cmd, str) else shlex.join(cmd)
+        elif shell is False:
+            self._cmd = shlex.split(cmd) if isinstance(cmd, str) else cmd
+        # Force start new session if cmd is a string
+        if isinstance(self._cmd, str):
+            self._start_new_session = True
+        # Store expected return code
+        self._expected_rc = rc
+        # Store sinks
+        self._stdout_sink = stdout_sink
+        self._stderr_sink = stderr_sink
+        # If quiet is set to True, remove default sinks
+        if quiet:
+            if self._stdout_sink is STDOUT_SINK:
+                self._stdout_sink = None
+            if self._stderr_sink is STDERR_SINK:
+                self._stderr_sink = None
+        # Fetch current environment
         environment = os.environ.copy()
+        # Make sure append_path is a list (and not a string or a path instance)
         if isinstance(append_path, (str, Path)):
             append_path = [append_path]
+        # Optionally append directories to path environment variable
         if append_path:
             for path in append_path:
                 path = Path(path).resolve(True)
                 environment["PATH"] = ":".join([path.as_posix(), environment["PATH"]])
+        # Optionally add user provided environment variables
         if env:
             environment.update(env)
-        self.options = {
-            "cwd": cwd,
-            "env": environment,
-            **kwargs,
-        }
-        self.stdout: str = ""
-        self.stderr: str = ""
+        # Store environment
+        self.environment = environment
+        # Initialize stdout and stderr which whill be parsed from command
+        self._stdout_read: str = ""
+        self._stderr_read: str = ""
+
+    async def run(self, rc: Optional[int] = ..., timeout: Optional[float] = ..., deadline: Optional[float] = ...) -> Command:  # type: ignore[assignment]
+        """Run the command"""
+        if timeout is not ... and deadline is not ...:
+            self._timeout = get_timeout(timeout, deadline)
+            self._deadline = get_deadline(timeout, deadline)
+        elif timeout is not ...:
+            self._timeout = get_timeout(timeout, None)
+            self._deadline = get_deadline(timeout, None)
+        elif deadline is not ...:
+            self._deadline = get_deadline(None, deadline)
+            self._timeout = get_timeout(None, deadline)
+        # Update expected rc
+        if rc is not ...:
+            self._expected_rc = rc
+        # Simply enter the context manager to execute the command
+        async with self:
+            pass
+        # Return self to easily chain function calls
+        return self
 
     @property
-    def cancelled(self) -> bool:
-        try:
-            return self._cancel_scope.cancel_called
-        except AttributeError:
-            return False
+    def options(self) -> Dict[str, Any]:
+        """Get anyio options provided to open_process async context manager"""
+        return {
+            "command": self._cmd,
+            "cwd": self.cwd.as_posix(),
+            "env": self.environment,
+            "stdin": self._stdin,
+            "stdout": self._stdout,
+            "stderr": self._stderr,
+            "start_new_session": self._start_new_session,
+        }
 
     @property
     def deadline(self) -> float:
-        try:
-            return self._cancel_scope.deadline
-        except AttributeError:
-            if self._deadline:
-                return self._deadline
-            elif self._timeout:
-                return current_clock_time() + self._timeout
-            else:
-                return float("inf")
+        """Get command deadline"""
+        return self._deadline
 
     @property
     def timeout(self) -> Optional[float]:
-        return (
-            self._deadline - current_clock_time() if self._deadline else self._timeout
-        )
+        """Get command timeout"""
+        return self._timeout
+
+    @property
+    def pid(self) -> Optional[int]:
+        """Return process ID"""
+        try:
+            return self.process.pid
+        except AttributeError:
+            return None
+
+    @property
+    def pgid(self) -> Optional[int]:
+        """Return process group ID"""
+        pid = self.pid
+        if pid is None:
+            return None
+        return os.getpgid(pid)
 
     @property
     def code(self) -> Optional[int]:
+        """Get command return code (may be None if command is not started or done yet)"""
         try:
             return self.process.returncode
         except AttributeError:
-            return False
+            return None
 
-    async def _process_stderr(self) -> None:
-        if self.process.stderr:
-            async for text in TextReceiveStream(self.process.stderr):
-                self.stderr += text
-                if self.echo_stderr:
-                    self.echo_stderr(text)
+    @property
+    def cmd(self) -> str:
+        """Return command as string"""
+        if isinstance(self._cmd, str):
+            return self._cmd
+        else:
+            return shlex.join(self._cmd)
 
-    async def _process_stdout(self) -> None:
-        if self.process.stdout:
-            async for text in TextReceiveStream(self.process.stdout):
-                self.stdout += text
-                if self.echo_stdout:
-                    self.echo_stdout(text)
+    @property
+    def tokens(self) -> List[str]:
+        """Return command as a list"""
+        if isinstance(self._cmd, str):
+            return shlex.split(self._cmd)
+        else:
+            return self._cmd
+
+    @property
+    def stdout(self) -> str:
+        """Return stdout read from command output"""
+        return self._stdout_read
+
+    @property
+    def lines(self) -> List[str]:
+        """Return lines splited from command output"""
+        return self._stdout_read.strip().splitlines(False)
+
+    @property
+    def stderr(self) -> str:
+        """Teturn stderr read from command output"""
+        return self._stderr_read
 
     def __repr__(self) -> str:
-        return f"Command(cmd={self.cmd}, done={self.code is not None}, rc={self.code}, cwd={self.cwd.as_posix()})"
+        """Human friendly string representation of a command"""
+        return f"Command(cmd={shlex.quote(self.cmd)}, pid={self.pid}, rc={self.code}, cwd={self.cwd.as_posix()})"
 
     async def __aenter__(self) -> Command:
-        self._exitstack = AsyncExitStack()
+        """Start the command using an asynchronous context manager"""
+        return await self.fire()
 
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Exit async context manager by exiting async exit stack"""
+        # Wait until process is complete
+        await self.gather(exc_type, exc_val, exc_tb)
+
+    async def fire(self) -> Command:
+        """Start the command"""
+        if self.deadline < get_event_loop_time():
+            raise
+        # It is needed to ensure that we will properly enter and exit nested context managers
+        self._exitstack = AsyncExitStack()
+        # Enter the exit stack
         await self._exitstack.__aenter__()
-        self._cancel_scope = await self._exitstack.enter_async_context(
-            move_on_after(self.timeout)
-        )
-        logger.info("Running command", cwd=self.cwd, cmd=self.cmd)
-        self.process = await self._exitstack.enter_async_context(
-            await open_process(self.cmd, **self.options)  # type: ignore[arg-type]
-        )
+        # Enter process async manager
+        log_options = self.options.copy()
+        log_options.pop("env", None)
+        logger.debug("Running command", **log_options)
+        try:
+            self.process: Process = await self._exitstack.enter_async_context(
+                await open_process(**self.options)
+            )
+        except FileNotFoundError:
+            raise CommandNotFoundError(command=self)
+        # Enter task group context manager
         self.tg = await self._exitstack.enter_async_context(create_task_group())
+        # Kick off processing tasks
         self.tg.start_soon(self._process_stdout)
         self.tg.start_soon(self._process_stderr)
+        self.tg.start_soon(self.process.wait)
+        # Return command instance
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-        return await self._exitstack.__aexit__(exc_type, exc_val, exc_tb)
+    async def gather(
+        self,
+        exc_type: Optional[Type[BaseException]] = None,
+        exc_val: Optional[BaseException] = None,
+        exc_tb: Optional[TracebackType] = None,
+    ) -> None:
+        # Exit early if an exception is encountered when exiting context manager
+        if exc_type is not None:
+            try:
+                # Terminate process on exception
+                self.terminate()
+                # Wait for process to complete
+                await self.wait()
+            finally:
+                # Exit stack
+                await self._exitstack.__aexit__(exc_type, exc_val, exc_tb)
+                # Exit function
+                return
+        # Wait for the process to finish using timeout
+        try:
+            returncode = await self.wait(deadline=self.deadline)
+            if returncode is None:
+                # Terminate process it is still pending after deadline
+                self.terminate()
+                # Wait for process to commplete
+                await self.wait()
+        except BaseException:
+            # Terminate process on exception while waiting
+            self.terminate()
+            # Wait for process to complete
+            await self.wait()
+            # Raise error back
+            raise
+        # In any case
+        finally:
+            # Gather new exc info at this point
+            exc_type, exc_val, exc_tb = sys.exc_info()
+            # Exit async stack
+            await self._exitstack.__aexit__(exc_type, exc_val, exc_tb)
+            # Optionally check rc
+            if self._expected_rc is not None:
+                self.raise_on_error(self._expected_rc)
 
-    def raise_on_error(self, success_rc: int = 0) -> None:
+    async def wait(
+        self, timeout: Optional[float] = None, deadline: Optional[float] = None
+    ) -> Optional[int]:
+        """Wait for command process to complete"""
+        pid: Optional[int] = None
+        with move_on_after(get_timeout(timeout, deadline)):
+            pid = await self.process.wait()
+        return pid
+
+    def terminate(self) -> None:
+        """Terminate command process (send SIGTERM)"""
+        self.send_signal(signal.SIGTERM)
+
+    def kill(self) -> None:
+        """Kill command process (send SIGKILL)"""
+        self.send_signal(signal.SIGKILL)
+
+    def send_signal(self, _signal: int) -> None:
+        """Send signal to command process"""
+        valid_signal = signal.Signals(_signal)
+        pid = self.pid
+        if pid is None:
+            return
+        try:
+            if self._start_new_session:
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, valid_signal.value)
+            else:
+                self.process.send_signal(valid_signal)
+        except ProcessLookupError:
+            return
+
+    async def _process_stderr(self) -> None:
+        """Process incoming stream of text received from command stderr"""
+        if self.process.stderr:
+            async for text in TextReceiveStream(self.process.stderr):
+                self._stderr_read += text
+                if iscoroutinefunction(self._stderr_sink):
+                    await self._stderr_sink(text)  # type: ignore[misc]
+                elif self._stderr_sink:
+                    self._stderr_sink(text)
+
+    async def _process_stdout(self) -> None:
+        """Process incoming stream if text received from command stdout"""
+        if self.process.stdout:
+            async for text in TextReceiveStream(self.process.stdout):
+                self._stdout_read += text
+                if iscoroutinefunction(self._stdout_sink):
+                    await self._stdout_sink(text)  # type: ignore[misc]
+                elif self._stdout_sink:
+                    self._stdout_sink(text)
+
+    def raise_on_error(self, expected_rc: Optional[int] = None) -> None:
         """Raise an error if command was cancelled or failed.
 
-        Failure is considered when return code is different than success_rc argument.
+        Failure is considered when return code is different than expected_rc argument.
         """
-        if self.cancelled:
-            raise CommandCancelledError(command=self)
-        if self.process.returncode != success_rc:
-            raise CommandFailedError(command=self, expected_rc=success_rc)
+        # If no expected return code is provided
+        if expected_rc is None:
+            # Expect a return code 0 by default
+            if self._expected_rc is None:
+                expected_rc = 0
+            # Expect return code found in command instance if it exists
+            else:
+                expected_rc = self._expected_rc
+        # Raise an error if actual return code is different from expected return code
+        if self.process.returncode != expected_rc:
+            raise CommandFailedError(command=self, expected_rc=expected_rc)
 
-    async def run(self, rc: Optional[int] = None) -> Command:
-        """Run the command"""
-        async with self:
-            pass
-        if rc is not None:
-            self.raise_on_error(rc)
-        # Return self in order to easily chain functions
-        return self
-
-    def add_argument(self, value: str) -> None:
+    def add_argument(
+        self, value: str, escape: bool = True, fmt: Optional[str] = None
+    ) -> None:
         """Add an argument to the command"""
-        if isinstance(self.cmd, str):
-            self.cmd = " ".join([self.cmd, value])
+        if escape:
+            value = shlex.quote(value)
+        if fmt:
+            value = format(value, fmt)
+        if isinstance(self._cmd, str):
+            self._cmd = " ".join([self._cmd, value])
         else:
-            self.cmd.append(value)
+            self._cmd.append(value)
 
     def add_option(
-        self, flag: str, value: Optional[str] = None, escape: bool = False
+        self,
+        flag: str,
+        value: Optional[str] = None,
+        eq: str = "=",
+        escape: bool = True,
+        fmt: Optional[str] = None,
     ) -> None:
         """Add an option to the command. Value can optionally be quoted using espace=True"""
-        if isinstance(self.cmd, str):
+        if isinstance(self._cmd, str):
             if value:
                 if escape:
                     value = shlex.quote(value)
-                self.cmd = " ".join([self.cmd, f"{flag}={value}"])
+                if fmt:
+                    value = format(value, fmt)
+                self._cmd = " ".join([self._cmd, f"{flag}{eq}{value}"])
             else:
-                self.cmd = " ".join([self.cmd, flag])
+                self._cmd = " ".join([self._cmd, flag])
         else:
             if value:
-                self.cmd.extend([flag, value])
+                self._cmd.extend([flag, value])
             else:
-                self.cmd.append(flag)
+                self._cmd.append(flag)
 
-    def add_repeat_option(self, flag: str, values: Union[str, Iterable[str]]) -> None:
+    def add_repeat_option(
+        self,
+        flag: str,
+        values: Union[str, Iterable[str]],
+        eq: str = "=",
+        sep: Optional[str] = None,
+        escape: bool = True,
+        fmt: Optional[str] = None,
+    ) -> None:
         """Add an option which can be repeated to the command"""
         if isinstance(values, str):
             values = [values]
-        for value in values:
-            self.add_option(flag, value)
+        if sep is None:
+            for value in values:
+                self.add_option(flag, value, eq=eq, escape=escape, fmt=fmt)
+        else:
+            if not isinstance(values, str):
+                values = sep.join(values)
+            self.add_option(flag, values, eq=eq, escape=escape, fmt=fmt)
 
-    def add_separated_option(
-        self, flag: str, values: Union[str, Iterable[str]], delimiter: str = ","
+    def add_kv_option(
+        self,
+        flag: str,
+        options: Optional[Mapping[str, str]] = None,
+        sep: str = ",",
+        eq: str = "=",
+        inner_eq: str = "=",
+        escape: bool = True,
+        fmt: Optional[str] = None,
+        **kwargs: str,
     ) -> None:
-        """Add an option which accept a list of values separated by a delimiter"""
-        if not isinstance(values, str):
-            values = delimiter.join(values)
-        self.add_option(flag, values)
+        """Add a key value option such as --build-arg=KEY=VALUE"""
+        _values: List[str] = []
+        options = {**options} if options else {}
+        if kwargs:
+            options.update(kwargs)
+        for key, value in options.items():
+            if fmt:
+                value = format(value, fmt)
+            _values.append(inner_eq.join([key, value]))
+
+        self.add_option(flag, sep.join(_values), eq=eq, escape=escape, fmt=None)
+
+    def add_repeat_options(
+        self,
+        flag: str,
+        values: Union[Iterable[Union[Iterable[str], str]], str],
+        eq: str = "=",
+        sep: str = ",",
+        escape: bool = True,
+    ) -> None:
+        if isinstance(values, str):
+            values = [values]
+        for value in values:
+            self.add_repeat_option(flag, value, eq=eq, sep=sep, escape=escape)
+
+    def add_kv_options(
+        self,
+        flag: str,
+        options: Union[Dict[str, str], Iterable[Mapping[str, str]]],
+        eq: str = "=",
+        inner_eq: str = "=",
+        sep: str = ",",
+        escape: bool = True,
+    ) -> None:
+        """Add a key value option such as --build-arg=KEY=VALUE"""
+        if isinstance(options, dict):
+            options = [options]
+        for _options in options:
+            self.add_kv_option(
+                flag, _options, sep=sep, eq=eq, inner_eq=inner_eq, escape=escape
+            )
+
+    def add_options(
+        self,
+        options: Mapping[str, Union[str, Iterable[str]]],
+        escape: bool = True,
+    ) -> None:
+        """Add a bunch of options from a mapping"""
+        for flag, values in options.items():
+            # add_repeat_option accept both string or iterable of strings
+            self.add_repeat_option(flag, values, escape=escape)
 
 
 async def run_command(
     cmd: Union[str, List[str]],
+    shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
     timeout: Optional[float] = None,
     deadline: Optional[float] = None,
-    echo_stdout: Optional[Callable[[str], None]] = echo,
-    echo_stderr: Optional[Callable[[str], None]] = echo,
+    stdin: int = PIPE,
+    stdout: int = PIPE,
+    stderr: int = PIPE,
+    start_new_session: bool = False,
+    stdout_sink: Union[
+        Callable[[str], None], Callable[[str], Coroutine[None, None, None]], None
+    ] = STDOUT_SINK,
+    stderr_sink: Union[
+        Callable[[str], None], Callable[[str], Coroutine[None, None, None]], None
+    ] = STDERR_SINK,
+    quiet: bool = False,
     rc: Optional[int] = None,
-    **kwargs: Any,
 ) -> Command:
     """Run a command asynchronously.
 
@@ -224,110 +513,142 @@ async def run_command(
     """
     command = Command(
         cmd,
+        shell=shell,
         cwd=cwd,
         env=env,
         append_path=append_path,
         timeout=timeout,
         deadline=deadline,
-        echo_stdout=echo_stdout,
-        echo_stderr=echo_stderr,
-        **kwargs,
+        stdin=stdin,
+        stdout=stdout,
+        stderr=stderr,
+        start_new_session=start_new_session,
+        stdout_sink=stdout_sink,
+        stderr_sink=stderr_sink,
+        quiet=quiet,
+        rc=rc,
     )
-    return await command.run(rc=rc)
+    return await command.run()
 
 
 async def check_command(
     cmd: Union[str, List[str]],
+    shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
     timeout: Optional[float] = None,
     deadline: Optional[float] = None,
-    echo_stdout: Optional[Callable[[str], None]] = None,
-    echo_stderr: Optional[Callable[[str], None]] = None,
+    stdin: int = PIPE,
+    stdout: int = PIPE,
+    stderr: int = PIPE,
+    start_new_session: bool = False,
+    stdout_sink: Union[
+        Callable[[str], None], Callable[[str], Coroutine[None, None, None]], None
+    ] = STDOUT_SINK,
+    stderr_sink: Union[
+        Callable[[str], None], Callable[[str], Coroutine[None, None, None]], None
+    ] = STDERR_SINK,
+    quiet: bool = True,
     rc: int = 0,
-    **kwargs: Any,
 ) -> Command:
     """Run a command asynchronously.
 
-    Behaves the same as run_command but raises an error in case of process error or when process is cancelled
+    By default, both stdout and stderr and printed to console.
     """
     command = Command(
         cmd,
+        shell=shell,
         cwd=cwd,
         env=env,
         append_path=append_path,
         timeout=timeout,
         deadline=deadline,
-        echo_stdout=echo_stdout,
-        echo_stderr=echo_stderr,
-        **kwargs,
+        stdin=stdin,
+        stdout=stdout,
+        stderr=stderr,
+        start_new_session=start_new_session,
+        stdout_sink=stdout_sink,
+        stderr_sink=stderr_sink,
+        quiet=quiet,
+        rc=rc,
     )
-    return await command.run(rc)
+    return await command.run()
 
 
 async def check_command_stdout(
     cmd: Union[str, List[str]],
+    shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
-    timeout: Optional[float] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
+    timeout: Optional[float] = None,
     deadline: Optional[float] = None,
-    echo_stdout: Optional[Callable[[str], None]] = None,
-    echo_stderr: Optional[Callable[[str], None]] = None,
+    stdin: int = PIPE,
+    start_new_session: bool = False,
     rc: Optional[int] = 0,
-    **kwargs: Any,
+    strip: bool = False,
 ) -> str:
-    """Run a command asynchronously.
-
-    Behaves the same as run_command but raises an error in case of process error or when process is cancelled by default.
-    Disable raising error by setting rc=None.
-
-    Return stdout content as a string.
-    """
+    """Run a command asynchronously and return stdout content as a string"""
     command = Command(
         cmd,
+        shell=shell,
         cwd=cwd,
         env=env,
         append_path=append_path,
         timeout=timeout,
         deadline=deadline,
-        echo_stdout=echo_stdout,
-        echo_stderr=echo_stderr,
-        **kwargs,
+        stdin=stdin,
+        stdout=PIPE,
+        stderr=PIPE,
+        start_new_session=start_new_session,
+        stdout_sink=None,
+        stderr_sink=None,
+        quiet=True,
+        rc=rc,
     )
-    await command.run(rc)
-    return command.stdout
+    # Return command stdout
+    await command.run()
+    if strip:
+        return command.stdout.strip()
+    else:
+        return command.stdout
 
 
 async def check_command_sterr(
     cmd: Union[str, List[str]],
+    shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
     timeout: Optional[float] = None,
     deadline: Optional[float] = None,
-    echo_stdout: Optional[Callable[[str], None]] = None,
-    echo_stderr: Optional[Callable[[str], None]] = None,
-    rc: Optional[int] = 0,
-    **kwargs: Any,
+    stdin: int = PIPE,
+    start_new_session: bool = False,
+    rc: Optional[int] = None,
+    strip: bool = False,
 ) -> str:
-    """Run a command asynchronously.
-
-    Behaves the same as run_command but can raises error if `raise_on_error` is set to True (default to False).
-
-    Return stderr content as a string.
-    """
+    """Run a command asynchronously and return stderr read from output"""
     command = Command(
         cmd,
+        shell=shell,
         cwd=cwd,
         env=env,
         append_path=append_path,
         timeout=timeout,
         deadline=deadline,
-        echo_stdout=echo_stdout,
-        echo_stderr=echo_stderr,
-        **kwargs,
+        stdin=stdin,
+        stdout=PIPE,
+        stderr=PIPE,
+        start_new_session=start_new_session,
+        stdout_sink=None,
+        stderr_sink=None,
+        quiet=True,
+        rc=rc,
     )
-    await command.run(rc)
-    return command.stdout
+    # Return command stdout
+    await command.run()
+    if strip:
+        return command.stderr.strip()
+    else:
+        return command.stderr
