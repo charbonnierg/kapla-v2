@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 from shutil import which
@@ -11,9 +10,7 @@ from pydantic import BaseModel
 from ..wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
 from .cmd import Command, check_command, run_command
 from .finder import DEFAULT_GITIGNORE, find_files
-
-IS_WINDOWS = os.name == "nt"
-
+from .windows import IS_WINDOWS
 
 SpecT = TypeVar("SpecT", bound=BaseModel)
 

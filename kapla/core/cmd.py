@@ -27,11 +27,10 @@ from anyio import create_task_group, move_on_after, open_process
 from anyio.abc import Process
 from anyio.streams.text import TextReceiveStream
 
-from kapla.core.base import IS_WINDOWS
-
 from .errors import CommandFailedError, CommandNotFoundError
 from .logger import logger
 from .timeout import get_deadline, get_event_loop_time, get_timeout
+from .windows import IS_WINDOWS
 
 STDOUT_SINK = partial(print, end="", sep="", file=sys.stdout)
 STDERR_SINK = partial(print, end="", sep="", file=sys.stderr)

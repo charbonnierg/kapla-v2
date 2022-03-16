@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Union
 
 from kapla.core.cmd import Command
-
-IS_WINDOWS = os.name == "nt"
+from kapla.core.windows import IS_WINDOWS
 
 
 async def build(
