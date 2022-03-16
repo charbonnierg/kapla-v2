@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import tomlkit
 from ruamel.yaml import YAML
 from tomlkit.toml_document import TOMLDocument
+
+# replacement strings
+WINDOWS_LINE_ENDING = r"\r\n"
+UNIX_LINE_ENDING = r"\n"
 
 yaml = YAML(typ="rt")
 
@@ -27,10 +31,15 @@ def dumps_toml(doc: Any) -> str:
     return tomlkit.dumps(doc)
 
 
-def write_toml(doc: Any, path: Union[str, Path]) -> Path:
+def write_toml(
+    doc: Any, path: Union[str, Path], eof: Optional[str] = UNIX_LINE_ENDING
+) -> Path:
     """Write TOML representation at filepath"""
     out = Path(path)
-    out.write_text(dumps_toml(doc))
+    content = dumps_toml(doc)
+    if eof == UNIX_LINE_ENDING:
+        content.replace(WINDOWS_LINE_ENDING, eof)
+    out.write_text(content)
     return out
 
 
@@ -52,8 +61,13 @@ def dumps_yaml(doc: Any) -> str:
     return yaml_out.read()
 
 
-def write_yaml(doc: Any, path: Union[str, Path]) -> Path:
+def write_yaml(
+    doc: Any, path: Union[str, Path], eof: Optional[str] = UNIX_LINE_ENDING
+) -> Path:
     """Write YAML file"""
     out = Path(path)
-    out.write_text(dumps_yaml(doc))
+    content = dumps_yaml(doc)
+    if eof == UNIX_LINE_ENDING:
+        content.replace(WINDOWS_LINE_ENDING, eof)
+    out.write_text(content)
     return out
