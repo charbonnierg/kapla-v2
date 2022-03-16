@@ -12,7 +12,7 @@ from ..wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
 from .cmd import Command, check_command, run_command
 from .finder import DEFAULT_GITIGNORE, find_files
 
-IS_WINDOWS = os.name == "rt"
+IS_WINDOWS = os.name == "nt"
 
 
 SpecT = TypeVar("SpecT", bound=BaseModel)
@@ -208,7 +208,7 @@ class BasePythonProject(BaseProject[SpecT]):
             timeout=timeout,
             deadline=deadline,
             env=environment,
-            append_path=self.venv_path / "bin",
+            append_path=self.venv_bin,
             rc=rc,
             quiet=quiet,
             **kwargs,
