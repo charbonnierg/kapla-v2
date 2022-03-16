@@ -27,6 +27,8 @@ from anyio import create_task_group, move_on_after, open_process
 from anyio.abc import Process
 from anyio.streams.text import TextReceiveStream
 
+from kapla.core.base import IS_WINDOWS
+
 from .errors import CommandFailedError, CommandNotFoundError
 from .logger import logger
 from .timeout import get_deadline, get_event_loop_time, get_timeout
@@ -321,8 +323,11 @@ class Command:
             return
         try:
             if self._start_new_session:
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, valid_signal.value)
+                if not IS_WINDOWS:
+                    pgid = os.getpgid(pid)
+                    os.killpg(pgid, valid_signal.value)
+                else:
+                    self.process.send_signal(valid_signal)
             else:
                 self.process.send_signal(valid_signal)
         except ProcessLookupError:
