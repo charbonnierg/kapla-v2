@@ -29,7 +29,7 @@ from kapla.specs.pyproject import (
     PyProjectSpec,
 )
 
-from ..core.base import BasePythonProject
+from .base import BasePythonProject
 from ..core.cmd import Command, get_deadline
 from ..core.errors import CommandFailedError
 from ..core.finder import find_dirs, find_files

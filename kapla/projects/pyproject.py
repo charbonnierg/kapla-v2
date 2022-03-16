@@ -19,7 +19,7 @@ import tomlkit
 from kapla.specs.pyproject import Dependency, PyProjectSpec
 from kapla.wrappers import poetry
 
-from ..core.base import BasePythonProject
+from .base import BasePythonProject
 from ..core.cmd import Command
 from ..core.errors import PyprojectNotFoundError
 from ..core.finder import lookup_file

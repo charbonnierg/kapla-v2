@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from shutil import which
 from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
-
 from pydantic import BaseModel
 
-from ..wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
-from .cmd import Command, check_command, run_command
-from .finder import DEFAULT_GITIGNORE, find_files
-from .windows import IS_WINDOWS
+from kapla.wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
+from kapla.core.cmd import Command, check_command, run_command
+from kapla.core.finder import DEFAULT_GITIGNORE, find_files
+from kapla.core.windows import IS_WINDOWS
 
 SpecT = TypeVar("SpecT", bound=BaseModel)
 
@@ -170,25 +168,34 @@ class BasePythonProject(BaseProject[SpecT]):
     async def run_module(
         self,
         *module: str,
+        shell: bool = True,
+        env: Optional[Mapping[str, str]] = None,
         rc: Optional[int] = None,
         quiet: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
         **kwargs: Any,
     ) -> Command:
-        """Uninstall a package using pip but does not remove package as dependency"""
+        """Run a python module"""
+        environment = {"VIRTUAL_ENV": self.venv_path.as_posix()}
+        if env:
+            environment.update(env)
         return await run_command(
             [self.python_executable, "-m", *module],
-            timeout=timeout,
-            deadline=deadline,
+            shell=shell,
+            env=environment,
+            append_path=self.venv_bin,
             rc=rc,
             quiet=quiet,
+            timeout=timeout,
+            deadline=deadline,
             **kwargs,
         )
 
     async def run_cmd(
         self,
         cmd: Union[str, List[str]],
+        shell: bool = True,
         env: Optional[Mapping[str, str]] = None,
         rc: Optional[int] = None,
         quiet: bool = False,
@@ -202,6 +209,7 @@ class BasePythonProject(BaseProject[SpecT]):
             environment.update(env)
         return await run_command(
             cmd,
+            shell=shell,
             timeout=timeout,
             deadline=deadline,
             env=environment,
@@ -307,14 +315,11 @@ class BasePythonProject(BaseProject[SpecT]):
         """Ensure venv is created within project"""
         kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
         # by default use python3
-        python = "python3"
-        # Check if it exist though
-        if which(python) is None:
-            # And fallback to "python" if not (windows users here you go)
-            python = "python"
+        python = "python" if IS_WINDOWS else "python3"
         # Create virtual environment
         await check_command(
             [python, "-m", "venv", self.venv_path.name],
+            shell=True,
             cwd=self.venv_path.parent,
             timeout=timeout,
             deadline=deadline,
