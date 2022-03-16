@@ -308,25 +308,33 @@ class Command:
 
     def terminate(self) -> None:
         """Terminate command process (send SIGTERM)"""
-        self.send_signal(signal.SIGTERM)
+        if IS_WINDOWS:
+            return self.process.terminate()
+        else:
+            return self.send_signal(signal.SIGTERM)
 
     def kill(self) -> None:
         """Kill command process (send SIGKILL)"""
-        self.send_signal(signal.SIGKILL)
+        if IS_WINDOWS:
+            return self.process.kill()
+        else:
+            return self.send_signal(signal.SIGKILL)
 
     def send_signal(self, _signal: int) -> None:
         """Send signal to command process"""
         valid_signal = signal.Signals(_signal)
+        if IS_WINDOWS:
+            try:
+                return self.process.send_signal(valid_signal)
+            except (ProcessLookupError, FileNotFoundError):
+                return
         pid = self.pid
         if pid is None:
             return
         try:
             if self._start_new_session:
-                if not IS_WINDOWS:
-                    pgid = os.getpgid(pid)
-                    os.killpg(pgid, valid_signal.value)
-                else:
-                    self.process.send_signal(valid_signal)
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, valid_signal.value)
             else:
                 self.process.send_signal(valid_signal)
         except ProcessLookupError:
