@@ -646,10 +646,8 @@ class KRepo(BaseKRepo):
                         results.append(cmd)
                         if cmd.code == 0:
                             print(f"Sucessfully built {project.name}")
-                            # Copy wheel only
-                            # await self.run_cmd(
-                            #     f"cp dist/*.whl {dist_root.as_posix()}", cwd=project.root
-                            # )
+                            for file in Path(project.root / "dist").glob("*.whl"):
+                                shutil.copy2(file, dist_root.as_posix())
                         else:
                             print(f"Failed to build {project.name}")
 
