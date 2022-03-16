@@ -6,7 +6,7 @@ from typing import Any, Iterable, Mapping, Optional, Union
 
 from kapla.core.cmd import Command
 
-IS_WINDOWS = os.name == "rt"
+IS_WINDOWS = os.name == "nt"
 
 
 async def build(
