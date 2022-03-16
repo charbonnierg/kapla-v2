@@ -25,7 +25,8 @@ from typing import (
 
 from anyio import create_task_group, move_on_after, open_process
 from anyio.abc import Process
-from anyio.streams.text import TextReceiveStream
+from anyio.streams.buffered import BufferedByteReceiveStream
+import chardet
 
 from .errors import CommandFailedError, CommandNotFoundError
 from .logger import logger
@@ -167,6 +168,8 @@ class Command:
         """Return process group ID"""
         pid = self.pid
         if pid is None:
+            return None
+        if IS_WINDOWS:
             return None
         return os.getpgid(pid)
 
@@ -342,8 +345,14 @@ class Command:
 
     async def _process_stderr(self) -> None:
         """Process incoming stream of text received from command stderr"""
+        default_encoding = "utf-8"
         if self.process.stderr:
-            async for text in TextReceiveStream(self.process.stderr):
+            async for chunk in BufferedByteReceiveStream(self.process.stderr):
+                try:
+                    text = chunk.decode(default_encoding)
+                except UnicodeDecodeError:
+                    default_encoding = chardet.detect(chunk)["encoding"]
+                    text = chunk.decode(default_encoding)
                 self._stderr_read += text
                 if iscoroutinefunction(self._stderr_sink):
                     await self._stderr_sink(text)  # type: ignore[misc]
@@ -352,8 +361,14 @@ class Command:
 
     async def _process_stdout(self) -> None:
         """Process incoming stream if text received from command stdout"""
+        default_encoding = "utf-8"
         if self.process.stdout:
-            async for text in TextReceiveStream(self.process.stdout):
+            async for chunk in BufferedByteReceiveStream(self.process.stdout):
+                try:
+                    text = chunk.decode(default_encoding)
+                except UnicodeDecodeError:
+                    default_encoding = chardet.detect(chunk)["encoding"]
+                    text = chunk.decode(default_encoding)
                 self._stdout_read += text
                 if iscoroutinefunction(self._stdout_sink):
                     await self._stdout_sink(text)  # type: ignore[misc]
