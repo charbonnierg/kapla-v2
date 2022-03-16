@@ -168,7 +168,7 @@ class BasePythonProject(BaseProject[SpecT]):
     async def run_module(
         self,
         *module: str,
-        shell: bool = True,
+        shell: bool = False,
         env: Optional[Mapping[str, str]] = None,
         rc: Optional[int] = None,
         quiet: bool = False,
@@ -195,7 +195,7 @@ class BasePythonProject(BaseProject[SpecT]):
     async def run_cmd(
         self,
         cmd: Union[str, List[str]],
-        shell: bool = True,
+        shell: bool = False,
         env: Optional[Mapping[str, str]] = None,
         rc: Optional[int] = None,
         quiet: bool = False,
