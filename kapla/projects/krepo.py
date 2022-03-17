@@ -249,6 +249,7 @@ class KRepo(BaseKRepo):
                 current_sequence = [project.name for project in async_sequences[-1]]
             except IndexError:
                 async_sequences.append(list())
+                continue
             # Create new sequence if any project is required as dependency
             if any(
                 name in current_sequence
