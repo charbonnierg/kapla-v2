@@ -6,7 +6,7 @@
 
 [tool.poetry]
 name = "kapla-cli-v2"
-version = "0.10.0"
+version = "0.11.0"
 description = ""
 authors = ["charbonnierg <guillaume.charbonnier@araymond.com>"]
 readme = "README.md"
