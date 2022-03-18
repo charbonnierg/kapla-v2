@@ -19,11 +19,11 @@ import tomlkit
 from kapla.specs.pyproject import Dependency, PyProjectSpec
 from kapla.wrappers import poetry
 
-from .base import BasePythonProject
 from ..core.cmd import Command
 from ..core.errors import PyprojectNotFoundError
 from ..core.finder import lookup_file
-from ..core.io import load_toml, write_toml
+from ..core.io import read_toml, write_toml
+from .base import BasePythonProject
 
 if TYPE_CHECKING:
     from .krepo import KRepo
@@ -35,7 +35,7 @@ class ReadWriteTOMLMixin:
     _raw: Any
 
     def read(self, path: Union[str, Path]) -> Any:
-        return load_toml(path)
+        return read_toml(path)
 
     def write(self, path: Union[str, Path]) -> Path:
         """Write TOML pyproject specs"""
@@ -214,7 +214,7 @@ class PyProject(
 
     async def poetry_add(
         self,
-        package: str,
+        *package: str,
         group: Optional[str] = None,
         editable: bool = False,
         extras: Union[str, Iterable[str], None] = None,
@@ -233,7 +233,7 @@ class PyProject(
     ) -> Command:
         """Add a package dependency."""
         return await poetry.add(
-            package,
+            *package,
             directory=self.root,
             virtualenv=self.venv_path,
             group=group,

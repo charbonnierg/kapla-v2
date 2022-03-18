@@ -11,9 +11,25 @@ from kapla.core.errors import CommandFailedError
 
 @dataclass
 class GitInfos:
+    """A class to store git infos"""
+
     commit: Optional[str] = None
     branch: Optional[str] = None
     tag: Optional[str] = None
+
+
+async def get_infos(directory: Union[Path, str, None] = None) -> GitInfos:
+    """Return tag, branch, commit as strings"""
+    tag, branch, commit = await asyncio.gather(
+        get_tag(directory),
+        get_branch(directory),
+        get_commit(directory),
+    )
+    return GitInfos(
+        commit=commit.strip() if commit else None,
+        branch=branch.strip() if branch else None,
+        tag=tag.strip() if tag else None,
+    )
 
 
 async def get_tag(directory: Union[Path, str, None] = None) -> Optional[str]:
@@ -62,17 +78,3 @@ async def get_log(
     except CommandFailedError:
         return None
     return cmd.stdout.strip()
-
-
-async def get_infos(directory: Union[Path, str, None] = None) -> GitInfos:
-    """Return tag, branch, commit as strings"""
-    tag, branch, commit = await asyncio.gather(
-        get_tag(directory),
-        get_branch(directory),
-        get_commit(directory),
-    )
-    return GitInfos(
-        commit=commit.strip() if commit else None,
-        branch=branch.strip() if branch else None,
-        tag=tag.strip() if tag else None,
-    )

@@ -29,12 +29,12 @@ from kapla.specs.pyproject import (
     PyProjectSpec,
 )
 
-from .base import BasePythonProject
 from ..core.cmd import Command, get_deadline
 from ..core.errors import CommandFailedError
 from ..core.finder import find_dirs, find_files
-from ..core.io import load_yaml, write_toml, write_yaml
+from ..core.io import read_yaml, write_toml, write_yaml
 from ..core.logger import logger
+from .base import BasePythonProject
 from .pyproject import KPyProject
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ class ReadWriteYAMLMixin:
 
     def read(self, path: Union[str, Path]) -> Any:
         """Read YAML project specs"""
-        return load_yaml(path)
+        return read_yaml(path)
 
     def write(self, path: Union[str, Path]) -> Path:
         """Write YAML project specs"""

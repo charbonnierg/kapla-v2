@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Union
+from typing import Any, Iterable, Optional, Union
 
 from kapla.core.cmd import Command
-from kapla.core.windows import IS_WINDOWS
 
 
 async def build(
     directory: Union[Path, str, None] = None,
     virtualenv: Optional[Path] = None,
     dist_format: Optional[str] = None,
-    env: Optional[Mapping[str, Any]] = None,
     quiet: bool = False,
     raise_on_error: bool = False,
     timeout: Optional[float] = None,
@@ -20,19 +18,11 @@ async def build(
 ) -> Command:
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = dict(env) if env else {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
 
     cmd = Command(
         "poetry build",
         cwd=directory,
-        append_path=venv_bin,
-        env=environment,
+        virtualenv=virtualenv,
         timeout=timeout,
         deadline=deadline,
         quiet=quiet,
@@ -68,18 +58,11 @@ async def install(
     """
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
+
     cmd = Command(
         "poetry install",
         cwd=directory,
-        env=environment,
-        append_path=venv_bin,
+        virtualenv=virtualenv,
         timeout=timeout,
         deadline=deadline,
         quiet=quiet,
@@ -123,19 +106,11 @@ async def lock(
     """
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
 
     cmd = Command(
         "poetry lock",
         cwd=directory,
-        env=environment,
-        append_path=venv_bin,
+        virtualenv=virtualenv,
         timeout=timeout,
         deadline=deadline,
         quiet=quiet,
@@ -166,19 +141,11 @@ async def update(
     """
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
 
     cmd = Command(
         "poetry update",
         cwd=directory,
-        env=environment,
-        append_path=venv_bin,
+        virtualenv=virtualenv,
         quiet=quiet,
         timeout=timeout,
         deadline=deadline,
@@ -193,7 +160,7 @@ async def update(
 
 
 async def add(
-    package: str,
+    *package: str,
     directory: Union[str, Path, None] = None,
     virtualenv: Union[str, Path, None] = None,
     group: Optional[str] = None,
@@ -218,19 +185,11 @@ async def add(
     """
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
 
     cmd = Command(
         "poetry add",
         cwd=directory,
-        env=environment,
-        append_path=venv_bin,
+        virtualenv=virtualenv,
         quiet=quiet,
         timeout=timeout,
         deadline=deadline,
@@ -258,7 +217,8 @@ async def add(
     if editable:
         cmd.add_option("--editable")
 
-    cmd.add_argument(package)
+    for pkg in package:
+        cmd.add_argument(pkg)
 
     return await cmd.run()
 
@@ -281,19 +241,11 @@ async def remove(
     """
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
 
     cmd = Command(
         "poetry remove",
         cwd=directory,
-        env=environment,
-        append_path=venv_bin,
+        virtualenv=virtualenv,
         quiet=quiet,
         timeout=timeout,
         deadline=deadline,
@@ -333,19 +285,11 @@ async def show(
     """Show project dependencies"""
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
 
     cmd = Command(
         "poetry show",
         cwd=directory,
-        env=environment,
-        append_path=venv_bin,
+        virtualenv=virtualenv,
         quiet=quiet,
         timeout=timeout,
         deadline=deadline,
@@ -388,19 +332,11 @@ async def publish(
     """
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-    environment = {}
-    if virtualenv:
-        virtualenv_path = Path(virtualenv)
-        venv_bin = (
-            virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
-        )
-        environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
 
     cmd = Command(
         "poetry publish",
         cwd=directory,
-        env=environment,
-        append_path=venv_bin,
+        virtualenv=virtualenv,
         quiet=quiet,
         timeout=timeout,
         deadline=deadline,

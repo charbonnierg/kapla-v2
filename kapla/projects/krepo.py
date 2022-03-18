@@ -28,7 +28,7 @@ from kapla.specs.repo import KRepoSpec, ProjectDependencies
 from ..core.cmd import Command
 from ..core.errors import KProjectNotFoundError
 from ..core.finder import find_dirs, find_files, find_files_using_gitignore, lookup_file
-from ..core.io import load_toml
+from ..core.io import read_toml
 from ..core.logger import logger
 from ..core.timeout import get_deadline
 from .kproject import KProject
@@ -326,15 +326,19 @@ class KRepo(BaseKRepo):
 
             deps_summary = self.get_single_project_dependencies(project_name)
 
+            # Iterate over groups
             for group_name, group_deps in deps_summary.groups.items():
+                # Fetch group name
                 repo_group_name = "--".join([project_name, group_name])
+                # Fetch group
                 repo_group_deps = deps_summary.repo_groups.get(repo_group_name, Group())
-
                 # Check if there is a missing group dependency in pyproject.toml compared to project.yml
                 for dep_name in group_deps.dependencies:
                     if dep_name in self.projects:
                         continue
-                    if dep_name not in repo_group_deps.dependencies:
+                    if dep_name.lower() not in [
+                        dep.lower() for dep in repo_group_deps.dependencies
+                    ]:
                         # We need to add the dependency to the group !
                         group_dep = group_deps.dependencies[dep_name]
                         missing_deps[repo_group_name][dep_name] = (
@@ -344,40 +348,49 @@ class KRepo(BaseKRepo):
                         )
                 # Check if there is a dependency in the group which is not needed
                 for dep in repo_group_deps.dependencies:
-                    if dep not in group_deps.dependencies:
+                    if dep.lower() not in [
+                        dep_name.lower() for dep_name in group_deps.dependencies
+                    ]:
                         logger.warning(
                             "Adding zombie dep", dep_name=dep, group=repo_group_name
                         )
                         # Append to zombie deps of visited group
                         zombie_deps[repo_group_name][dep] = None
 
-            for dep_name, dep_spec in deps_summary.dependencies.items():
+            for dep, dep_spec in deps_summary.dependencies.items():
 
-                if dep_name in self.projects:
+                if dep in self.projects:
                     continue
 
                 repo_dependencies = deps_summary.repo_dependencies
 
                 # Check if there is a missing dependency in pyproject.toml compared to project.yml
-                if dep_name not in repo_dependencies:
+                if dep.lower() not in [
+                    dep_name.lower() for dep_name in repo_dependencies
+                ]:
                     for repo_group in deps_summary.repo_groups.values():
-                        if dep_name in repo_group.dependencies:
+                        if dep.lower() in [
+                            dep_name.lower() for dep_name in repo_group.dependencies
+                        ]:
                             break
                     else:
-                        missing_deps[project_name][dep_name] = dep_spec
+                        logger.warning("Adding missing dep", dep_name=dep)
+                        missing_deps[project_name][dep] = dep_spec
 
             # Check if there is a dep which is not present in any project
             for dep in deps_summary.repo_dependencies:
                 # Try to find a usage of the dep
-                if dep in deps_summary.dependencies:
-                    continue
+                if dep.lower() in [dep.lower() for dep in deps_summary.dependencies]:
+                    break
                 for project_group in deps_summary.groups.values():
-                    if dep in project_group.dependencies:
+                    if dep.lower() in [
+                        dep_name.lower() for dep_name in project_group.dependencies
+                    ]:
                         break
                     else:
                         continue
                 else:
-                    logger.warning("Adding zombie dep", dep_name=dep)
+                    logger.warning("Removing zombie dep", dep_name=dep)
                     zombie_deps[project_name][dep] = None
 
         return missing_deps, {group: list(deps) for group, deps in zombie_deps.items()}
@@ -386,7 +399,7 @@ class KRepo(BaseKRepo):
         """Get packages lock file as a pydantic model"""
         lock_path = self.root / "poetry.lock"
         if lock_path.exists():
-            lockfile_content = load_toml(lock_path)
+            lockfile_content = read_toml(lock_path)
             locked_packages = {package["name"]: package for package in lockfile_content["package"]}  # type: ignore[union-attr, index]
             locked_metadata: Any = lockfile_content["metadata"]
 
@@ -410,13 +423,15 @@ class KRepo(BaseKRepo):
     async def add_missing_dependencies(self) -> None:
         missing_deps, _ = self.get_projects_dependencies_missing()
         for group, deps in missing_deps.items():
+            packages: Set[str] = set()
             for dep_name, dep in deps.items():
                 if dep.version is None or dep.version == "*":
-                    package = dep_name
+                    packages.add(dep_name)
                 else:
-                    package = f"{dep_name}@{dep.version}"
+                    packages.add(f"{dep_name}@{dep.version}")
+            if packages:
                 await self.poetry_add(
-                    package,
+                    *packages,
                     group=group,
                     editable=True if dep.develop else False,
                     extras=dep.extras,
@@ -452,9 +467,17 @@ class KRepo(BaseKRepo):
         try:
             # Compute deadline to use to enforce timeouts
             deadline = get_deadline(timeout, deadline)
+            # Get list of projects to install
+            projects_names = [
+                project.name
+                for project in self.list_projects(
+                    include=include_projects, exclude=exclude_projects
+                )
+            ]
+            # Get projects not required
+            exclude_projects = set(self.projects_names).difference(projects_names)
             # Perform first round of install
             await self.poetry_install(
-                include_groups=include_projects,
                 exclude_groups=exclude_projects,
                 raise_on_error=True,
                 deadline=deadline,
@@ -537,7 +560,6 @@ class KRepo(BaseKRepo):
         include_groups: Optional[Iterable[str]] = None,
         exclude_groups: Optional[Iterable[str]] = None,
         only_groups: Optional[Iterable[str]] = None,
-        no_root: bool = False,
         default: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
@@ -553,14 +575,20 @@ class KRepo(BaseKRepo):
         try:
             # Compute deadline to use to enforce timeouts
             deadline = get_deadline(timeout, deadline)
-
+            # Get list of projects to install
+            projects_names = [
+                project.name
+                for project in self.list_projects(
+                    include=include_projects, exclude=exclude_projects
+                )
+            ]
+            # Get projects not required
+            exclude_projects = set(self.projects_names).difference(projects_names)
             # Perform first round of install
             await self.poetry_install(
-                include_groups=include_projects,
                 exclude_groups=exclude_projects,
                 raise_on_error=True,
                 deadline=deadline,
-                no_root=no_root,
             )
             # List of all results
             all_results: List[Command] = []

@@ -23,10 +23,10 @@ from typing import (
     Union,
 )
 
+import chardet
 from anyio import create_task_group, move_on_after, open_process
 from anyio.abc import Process
 from anyio.streams.buffered import BufferedByteReceiveStream
-import chardet
 
 from .errors import CommandFailedError, CommandNotFoundError
 from .logger import logger
@@ -45,6 +45,7 @@ class Command:
         cmd: Union[str, List[str]],
         shell: Optional[bool] = None,
         cwd: Union[str, Path, None] = None,
+        virtualenv: Union[str, Path, None] = None,
         env: Optional[Mapping[str, str]] = None,
         append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
         timeout: Optional[float] = None,
@@ -98,14 +99,25 @@ class Command:
         # Make sure append_path is a list (and not a string or a path instance)
         if isinstance(append_path, (str, Path)):
             append_path = [append_path]
+        # Optionally add user provided environment variables
+        if env:
+            environment.update(env)
+        # Update environment to execute command within virtual environment
+        if virtualenv:
+            virtualenv_path = Path(virtualenv)
+            venv_bin = (
+                virtualenv_path / "Scripts" if IS_WINDOWS else virtualenv_path / "bin"
+            )
+            environment.update({"VIRTUAL_ENV": virtualenv_path.as_posix()})
+            if append_path:
+                append_path.append(venv_bin)
+            else:
+                append_path = [venv_bin]
         # Optionally append directories to path environment variable
         if append_path:
             for path in append_path:
                 path = Path(path).resolve(True)
                 environment["PATH"] = ":".join([path.as_posix(), environment["PATH"]])
-        # Optionally add user provided environment variables
-        if env:
-            environment.update(env)
         # Store environment
         self.environment = environment
         # Initialize stdout and stderr which whill be parsed from command
@@ -517,6 +529,7 @@ async def run_command(
     cmd: Union[str, List[str]],
     shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
+    virtualenv: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
     timeout: Optional[float] = None,
@@ -542,6 +555,7 @@ async def run_command(
         cmd,
         shell=shell,
         cwd=cwd,
+        virtualenv=virtualenv,
         env=env,
         append_path=append_path,
         timeout=timeout,
@@ -562,6 +576,7 @@ async def check_command(
     cmd: Union[str, List[str]],
     shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
+    virtualenv: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
     timeout: Optional[float] = None,
@@ -587,6 +602,7 @@ async def check_command(
         cmd,
         shell=shell,
         cwd=cwd,
+        virtualenv=virtualenv,
         env=env,
         append_path=append_path,
         timeout=timeout,
@@ -607,6 +623,7 @@ async def check_command_stdout(
     cmd: Union[str, List[str]],
     shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
+    virtualenv: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
     timeout: Optional[float] = None,
@@ -621,6 +638,7 @@ async def check_command_stdout(
         cmd,
         shell=shell,
         cwd=cwd,
+        virtualenv=virtualenv,
         env=env,
         append_path=append_path,
         timeout=timeout,
@@ -646,6 +664,7 @@ async def check_command_sterr(
     cmd: Union[str, List[str]],
     shell: Optional[bool] = None,
     cwd: Union[str, Path, None] = None,
+    virtualenv: Union[str, Path, None] = None,
     env: Optional[Mapping[str, str]] = None,
     append_path: Optional[Union[str, Path, List[Union[str, Path]], None]] = None,
     timeout: Optional[float] = None,
@@ -660,6 +679,7 @@ async def check_command_sterr(
         cmd,
         shell=shell,
         cwd=cwd,
+        virtualenv=virtualenv,
         env=env,
         append_path=append_path,
         timeout=timeout,

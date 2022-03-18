@@ -3,12 +3,13 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
+
 from pydantic import BaseModel
 
-from kapla.wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
 from kapla.core.cmd import Command, check_command, run_command
 from kapla.core.finder import DEFAULT_GITIGNORE, find_files
 from kapla.core.windows import IS_WINDOWS
+from kapla.wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
 
 SpecT = TypeVar("SpecT", bound=BaseModel)
 
