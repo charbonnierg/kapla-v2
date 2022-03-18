@@ -4,7 +4,9 @@ import fnmatch
 import os
 import re
 from pathlib import Path
-from typing import Iterable, Iterator, Optional, Pattern, Tuple, Union
+from typing import AsyncIterator, Iterable, Iterator, Optional, Pattern, Tuple, Union
+
+from kapla.wrappers.git import get_files
 
 DEFAULT_GITIGNORE = [
     "__pycache__/",
@@ -44,7 +46,6 @@ DEFAULT_GITIGNORE = [
     "__pypackages__/",
     ".env",
     ".venv",
-    "env",
     "venv",
     "ENV",
     "env.bak",
@@ -57,9 +58,7 @@ DEFAULT_GITIGNORE = [
     ".pyre/",
     ".pytype/",
     "cython_debug/",
-    ".git",
     ".ipynb_checkpoints",
-    ".vscode",
 ]
 
 
@@ -131,6 +130,24 @@ def find_files(
         for file in current_files:
             if pattern_re.match(file):
                 yield current_path / file
+
+
+async def find_git_files(
+    pattern: Union[str, Iterable[str], None] = None,
+    root: Union[Path, str, None] = None,
+) -> AsyncIterator[Path]:
+    """Find files tracked by git"""
+    files = await get_files(root)
+    root = Path(root).resolve(True) if root else Path.cwd().resolve(True)
+
+    if pattern:
+        pattern_re, _ = get_patterns(pattern)
+        for file in files:
+            if pattern_re.match(file):
+                yield root / file
+    else:
+        for file in files:
+            yield root / file
 
 
 def find_dirs(

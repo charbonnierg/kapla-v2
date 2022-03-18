@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Union
 
-from kapla.core.cmd import Command, check_command_stdout
+from kapla.core.cmd import Command, check_command, check_command_stdout
 from kapla.core.errors import CommandFailedError
 
 
@@ -60,6 +60,15 @@ async def get_commit(directory: Union[Path, str, None] = None) -> Optional[str]:
         )
     except CommandFailedError:
         return None
+
+
+async def get_files(directory: Union[Path, str, None] = None) -> List[str]:
+    """Get list of files tracked by git"""
+    try:
+        cmd = await check_command("git ls-files", cwd=directory)
+    except CommandFailedError:
+        return []
+    return cmd.lines
 
 
 async def get_log(
