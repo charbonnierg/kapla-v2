@@ -818,10 +818,10 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 ).as_posix(),
             )
             if platforms:
-                platforms = list(set(spec.platforms).union(platforms))
+                platform = list(set(spec.platforms).union(platforms))
             else:
                 platform = spec.platforms
-            if platforms:
+            if platform:
                 cmd.add_repeat_option("--platform", platform)
             cmd.add_argument(
                 Path(self.root, spec.context).resolve(True).as_posix()
