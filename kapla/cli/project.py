@@ -3,7 +3,7 @@ from __future__ import annotations
 from argparse import ArgumentParser, _SubParsersAction
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from anyio import run
 
@@ -161,19 +161,34 @@ def do_build_docker(args: Any) -> None:
     push: bool = args.push
     output_dir: Optional[str] = args.output_dir
     no_build_dist: bool = args.no_build_dist
-    build_args: Tuple[str] = args.build_arg
-    platforms: Tuple[str] = args.platform
+    build_args: List[List[str]] = args.build_arg
+    platforms: List[List[str]] = args.platform
+
+    parsed_build_args: Dict[str, str] = {}
+    for build_arg in build_args or []:
+        key, value = build_arg[0].split("=")
+        parsed_build_args[key] = value
+
+    parsed_platforms: List[str] = []
+    for platform in platforms or []:
+        parsed_platforms.append(platform[0])
+
+    from structlog import get_logger
+
+    logger = get_logger()
+    logger.warning(
+        "Parsed options", build_args=parsed_build_args, platforms=parsed_platforms
+    )
 
     repo = KRepo.find_current()
     project = repo.find_current_project()
-
     docker_func = partial(
         project.build_docker,
         tag=tag,
         load=load,
         push=push,
-        build_args={key.split("=")[0]: key.split("=")[1] for key in build_args},
-        platforms=platforms,
+        build_args=parsed_build_args,
+        platforms=parsed_platforms,
         output_dir=output_dir,
         build_dist=False if no_build_dist else True,
     )
