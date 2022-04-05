@@ -118,6 +118,8 @@ def set_docker_parser(parser: ArgumentParser) -> None:
     parser.add_argument("--push", action="store_true", default=False)
     parser.add_argument("--output-dir", "-o", required=False, default=None)
     parser.add_argument("--no-build-dist", action="store_true", default=False)
+    parser.add_argument("--build-arg", nargs="+", action="append", dest="build_arg")
+    parser.add_argument("--platform", nargs="+", action="append", dest="platform")
 
 
 def set_project_parser(
@@ -159,6 +161,8 @@ def do_build_docker(args: Any) -> None:
     push: bool = args.push
     output_dir: Optional[str] = args.output_dir
     no_build_dist: bool = args.no_build_dist
+    build_args: Tuple[str] = args.build_arg
+    platforms: Tuple[str] = args.platform
 
     repo = KRepo.find_current()
     project = repo.find_current_project()
@@ -168,6 +172,8 @@ def do_build_docker(args: Any) -> None:
         tag=tag,
         load=load,
         push=push,
+        build_args={key.split("=")[0]: key.split("=")[1] for key in build_args},
+        platforms=platforms,
         output_dir=output_dir,
         build_dist=False if no_build_dist else True,
     )

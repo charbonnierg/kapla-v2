@@ -714,6 +714,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         tag: Optional[str] = None,
         load: bool = False,
         push: bool = False,
+        build_args: Optional[Dict[str, str]] = None,
+        platforms: Optional[List[str]] = None,
         output_dir: Union[str, Path, None] = None,
         build_dist: bool = True,
         build_dist_env: Optional[Dict[str, str]] = None,
@@ -758,7 +760,10 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             cmd = Command(
                 "docker buildx build", deadline=deadline, quiet=quiet, **kwargs
             )
-            build_args = spec.build_args.copy() if spec.build_args else {}
+            _build_args = spec.build_args.copy() if spec.build_args else {}
+            if build_args:
+                _build_args.update(build_args)
+            build_args = _build_args.copy()
             if spec.base_image and "BASE_IMAGE" not in build_args:
                 if ":" not in spec.base_image:
                     base_image = spec.base_image + ":" + tag
@@ -774,6 +779,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             if git_infos.tag:
                 build_args["GIT_TAG"] = git_infos.tag
             # Add build args
+            logger.warning("Using build args", build_args=build_args)
             for key, value in build_args.items():
                 cmd.add_option("--build-arg", "=".join([key, value]), escape=True)
             # Add labels
@@ -811,8 +817,12 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                     "-".join([self.name, self.version]) + ".docker-metadata",
                 ).as_posix(),
             )
-            if spec.platforms:
-                cmd.add_repeat_option("--platform", spec.platforms)
+            if platforms:
+                platforms = list(set(spec.platforms).union(platforms))
+            else:
+                platform = spec.platforms
+            if platforms:
+                cmd.add_repeat_option("--platform", platform)
             cmd.add_argument(
                 Path(self.root, spec.context).resolve(True).as_posix()
                 if spec.context
