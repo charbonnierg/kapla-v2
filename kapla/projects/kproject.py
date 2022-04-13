@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import shutil
+from collections import defaultdict
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -17,6 +19,7 @@ from typing import (
     Union,
 )
 
+from anyio import create_task_group
 from pydantic import ValidationError
 
 from kapla.specs.common import BuildSystem
@@ -156,15 +159,20 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             for name in self.get_dependencies_names()
             if name in self.repo.projects
         }
-
+        _need_to_inspect = set(local_projects)
+        _inspected: Set[str] = set([self.name])
+        # For each local dependency
+        while _need_to_inspect:
+            local_dep = local_projects[_need_to_inspect.pop()]
+            for dep in local_dep.get_local_dependencies():
+                local_projects[dep] = self.repo.projects[dep]
+                if dep not in _inspected:
+                    _need_to_inspect.add(dep)
+                else:
+                    _inspected.add(dep)
         # Gather local dependencies to override
         return {
-            name: Dependency.parse_obj(
-                {
-                    "path": project.root.as_posix(),
-                    "develop": True,
-                }
-            )
+            name: Dependency.parse_obj({"version": "*"})
             for name, project in local_projects.items()
         }
 
@@ -172,19 +180,32 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         self,
         include_local: bool = True,
         include_python: bool = True,
+        lock_versions: bool = True,
     ) -> Tuple[Dict[str, Dependency], Dict[str, List[str]], Dict[str, Group]]:
         """Return dependencies, extras and groups"""
         dependencies: Dict[str, Dependency] = {}
         groups: Dict[str, Group] = {}
         extras: Dict[str, List[str]] = {}
+        # Fetch constraints
+        constraints: Dict[str, str]
+        if self.repo is None:
+            constraints = defaultdict(lambda: "*")
+        else:
+            constraints = self.repo.get_packages_constraints()
         # Iterate over dependencies and replace version
         for dep in self.spec.dependencies:
             if isinstance(dep, str):
-                locked_version = self.get_locked_version(dep)
+                if lock_versions:
+                    locked_version = self.get_locked_version(dep)
+                else:
+                    locked_version = constraints.get(dep, "*")
                 dependencies[dep] = Dependency(version=locked_version)
             else:
                 for key, value in dep.items():
-                    locked_version = self.get_locked_version(key)
+                    if lock_versions:
+                        locked_version = self.get_locked_version(key)
+                    else:
+                        locked_version = constraints.get(key, "*")
                     dependencies[key] = Dependency.parse_obj(
                         {
                             **value.dict(exclude_unset=True, by_alias=True),
@@ -199,7 +220,10 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             # Iterate over dependencies and replace version
             for dep in group_dependencies:
                 if isinstance(dep, str):
-                    locked_version = self.get_locked_version(dep)
+                    if lock_versions:
+                        locked_version = self.get_locked_version(dep)
+                    else:
+                        locked_version = constraints.get(dep, "*")
                     # Add dependency to group
                     groups[group_name].dependencies[dep] = Dependency(
                         version=locked_version
@@ -217,7 +241,10 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                         )
                 else:
                     for key, value in dep.items():
-                        locked_version = self.get_locked_version(key)
+                        if lock_versions:
+                            locked_version = self.get_locked_version(key)
+                        else:
+                            locked_version = constraints.get(key, "*")
                         # Add dependency to group
                         groups[group_name].dependencies[key] = Dependency.parse_obj(
                             {
@@ -253,26 +280,6 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         # Return values
         return dependencies, extras, groups
 
-    def get_install_dependencies(
-        self,
-    ) -> Tuple[Dict[str, Dependency], Dict[str, List[str]], Dict[str, Group]]:
-        dependencies, extras, groups = self.get_build_dependencies()
-        local_dependencies = self.get_local_dependencies()
-
-        # Iterate on dependencies to apply local deps overrides
-        for name in dependencies:
-            if name in local_dependencies:
-                dependencies[name] = local_dependencies[name]
-
-        # Iterate on groups to apply local deps overrides
-        for group_name, group in groups.items():
-            # Iterate on each group dependencies
-            for name in group.dependencies:
-                if name in local_dependencies:
-                    groups[group_name].dependencies[name] = local_dependencies[name]
-
-        return dependencies, extras, groups
-
     def get_locked_version(self, package: str) -> str:
         if self.repo:
             return self.repo.get_locked_version(package)
@@ -280,13 +287,14 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             return "*"
 
     def get_pyproject_spec(
-        self, develop: bool = False, build_system: BuildSystem = DEFAULT_BUILD_SYSTEM
+        self,
+        lock_versions: bool = True,
+        build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
     ) -> PyProjectSpec:
         """Create content of pyproject.toml file according to project.yaml"""
-        if develop:
-            dependencies, extras, groups = self.get_install_dependencies()
-        else:
-            dependencies, extras, groups = self.get_build_dependencies()
+        dependencies, extras, groups = self.get_build_dependencies(
+            lock_versions=lock_versions
+        )
         # Gather raw tool.poetry configuration byt exclude dependencies, extras and group fields
         raw_poetry_config = self.spec.dict(
             by_alias=True,
@@ -306,14 +314,16 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     def write_pyproject(
         self,
         path: Union[str, Path, None] = None,
-        develop: bool = False,
+        lock_versions: bool = True,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
     ) -> KPyProject:
         """Write auto-generated pyproject.toml file.
 
         If path argument is not specified, file is generated in the project directory by default.
         """
-        spec = self.get_pyproject_spec(develop=develop, build_system=build_system)
+        spec = self.get_pyproject_spec(
+            lock_versions=lock_versions, build_system=build_system
+        )
         pyproject_path = Path(path) if path else self.pyproject_path
         content = spec.dict()
         # Create an inline table to have more readable pyprojects
@@ -353,13 +363,13 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     def temporary_pyproject(
         self,
         path: Union[str, Path, None] = None,
-        develop: bool = False,
+        lock_versions: bool = True,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
         clean: bool = True,
     ) -> Iterator[KPyProject]:
         """A context manager which ensures pyproject.toml is written to disk within context and removed out of context"""
         pyproject = self.write_pyproject(
-            path, develop=develop, build_system=build_system
+            path, lock_versions=lock_versions, build_system=build_system
         )
         try:
             yield pyproject
@@ -367,86 +377,40 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             if clean:
                 self.remove_pyproject()
 
-    async def show(
-        self,
-        exclude_groups: Union[List[str], str, None] = None,
-        include_groups: Union[List[str], str, None] = None,
-        only_groups: Union[List[str], str, None] = None,
-        default: Union[List[str], str, None] = None,
-        tree: bool = False,
-        latest: bool = False,
-        outdated: bool = False,
-        clean: bool = True,
-        quiet: bool = False,
-        raise_on_error: bool = False,
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-        **kwargs: Any,
-    ) -> Command:
-        """Show project dependencies"""
-        if not self.repo:
-            with self.temporary_pyproject(
-                self.pyproject_path, develop=True, clean=clean
-            ) as pyproject:
-                await pyproject.poetry_lock(
-                    echo_stdout=None, no_update=True, raise_on_error=raise_on_error
-                )
-                return await pyproject.poetry_show(
-                    exclude_groups=exclude_groups,
-                    include_groups=include_groups,
-                    only_groups=only_groups,
-                    default=default,
-                    tree=tree,
-                    latest=latest,
-                    outdated=outdated,
-                    quiet=quiet,
-                    raise_on_error=raise_on_error,
-                    timeout=timeout,
-                    deadline=deadline,
-                    **kwargs,
-                )
-        else:
-            try:
-                for project in self.repo.list_projects(
-                    self.get_local_dependencies_names()
-                ):
-                    project.write_pyproject(develop=True)
-                # Write pyproject
-                pyproject = self.write_pyproject(develop=True)
-                # Lock and show deps
-                await pyproject.poetry_lock(
-                    echo_stdout=None, no_update=True, raise_on_error=raise_on_error
-                )
-                return await pyproject.poetry_show(
-                    exclude_groups=exclude_groups,
-                    include_groups=include_groups,
-                    only_groups=only_groups,
-                    default=default,
-                    tree=tree,
-                    latest=latest,
-                    outdated=outdated,
-                    quiet=quiet,
-                    raise_on_error=raise_on_error,
-                    timeout=timeout,
-                    deadline=deadline,
-                    **kwargs,
-                )
-            finally:
-                self.repo.clean_pyproject_files()
-
     async def build(
         self,
         env: Optional[Mapping[str, Any]] = None,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        lock_versions: bool = True,
+        clear_dist: bool = True,
         clean: bool = True,
         quiet: bool = False,
         raise_on_error: bool = False,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
+        recurse: bool = True,
         **kwargs: Any,
     ) -> Command:
+        if recurse and self.repo:
+            async with create_task_group() as tg:
+                for name in self.get_local_dependencies_names():
+                    tg.start_soon(
+                        partial(
+                            self.repo.projects[name].build,
+                            env=env,
+                            quiet=quiet,
+                            build_system=build_system,
+                            lock_versions=lock_versions,
+                            recurse=False,
+                        )
+                    )
+        if clear_dist:
+            shutil.rmtree(self.root / "dist", ignore_errors=True)
         with self.temporary_pyproject(
-            self.pyproject_path, develop=False, build_system=build_system, clean=clean
+            self.pyproject_path,
+            lock_versions=lock_versions,
+            build_system=build_system,
+            clean=clean,
         ) as pyproject:
             return await pyproject.poetry_build(
                 env=env,
@@ -463,75 +427,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         include_groups: Union[Iterable[str], str, None] = None,
         only_groups: Union[Iterable[str], str, None] = None,
         default: bool = False,
-        build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
-        clean: bool = True,
-        quiet: bool = False,
-        raise_on_error: bool = False,
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-        **kwargs: Any,
-    ) -> Optional[Command]:
-        return await self.pep_660_install(
-            exclude_groups=exclude_groups,
-            include_groups=include_groups,
-            only_groups=only_groups,
-            default=default,
-            build_system=build_system,
-            clean=clean,
-            quiet=quiet,
-            raise_on_error=raise_on_error,
-            timeout=timeout,
-            deadline=deadline,
-            **kwargs,
-        )
-
-    async def poetry_install(
-        self,
-        exclude_groups: Union[Iterable[str], str, None] = None,
-        include_groups: Union[Iterable[str], str, None] = None,
-        only_groups: Union[Iterable[str], str, None] = None,
-        default: bool = False,
-        sync: bool = False,
-        no_root: bool = False,
-        dry_run: bool = False,
-        extras: Union[Iterable[str], str, None] = None,
-        build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
-        clean: bool = True,
-        quiet: bool = False,
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-        raise_on_error: bool = False,
-        **kwargs: Any,
-    ) -> Optional[Command]:
-        """Install project using poetry (not recommended, use `KProject.pep_660_install()` instead)"""
-        with self.temporary_pyproject(
-            self.pyproject_path,
-            clean=clean,
-            develop=True,
-            build_system=build_system,
-        ) as pyproject:
-            return await pyproject.poetry_install(
-                exclude_groups=exclude_groups,
-                include_groups=include_groups,
-                only_groups=only_groups,
-                default=default,
-                sync=sync,
-                no_root=no_root,
-                dry_run=dry_run,
-                extras=extras,
-                quiet=quiet,
-                raise_on_error=raise_on_error,
-                timeout=timeout,
-                deadline=deadline,
-                **kwargs,
-            )
-
-    async def pep_660_install(
-        self,
-        exclude_groups: Union[Iterable[str], str, None] = None,
-        include_groups: Union[Iterable[str], str, None] = None,
-        only_groups: Union[Iterable[str], str, None] = None,
-        default: bool = False,
+        lock_versions: bool = True,
+        force: bool = False,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
         clean: bool = True,
         quiet: bool = False,
@@ -545,7 +442,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 "PEP 660 install is not supported without parent repo"
             )
         if self.is_already_installed():
-            return None
+            if not force:
+                return None
         groups = list(self.spec.extras)
         if default:
             groups = []
@@ -559,10 +457,15 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         target = self.root.as_posix()
         if groups:
             target += f'[{",".join(groups)}]'
+        logger.debug(
+            f"Installing {self.name}",
+            version=self.version,
+            package=target,
+        )
         with self.temporary_pyproject(
             self.pyproject_path,
             clean=clean,
-            develop=False,
+            lock_versions=lock_versions,
             build_system=build_system,
         ):
             return await self.repo.pip_install(
@@ -718,6 +621,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         platforms: Optional[List[str]] = None,
         output_dir: Union[str, Path, None] = None,
         build_dist: bool = True,
+        lock_versions: bool = True,
         build_dist_env: Optional[Dict[str, str]] = None,
         build_dist_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
         quiet: bool = False,
@@ -833,7 +737,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 await self.build(
                     env=build_dist_env,
                     build_system=build_dist_system,
-                    quiet=quiet,
+                    lock_versions=lock_versions,
+                    quiet=True,
                     deadline=deadline,
                     **kwargs,
                 )

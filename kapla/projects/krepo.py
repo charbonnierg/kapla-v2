@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import sys
 from collections import defaultdict
 from graphlib import TopologicalSorter
 from pathlib import Path
@@ -187,7 +186,6 @@ class KRepo(BaseKRepo):
                 must_install.update(
                     self.projects[project_name].get_local_dependencies_names()
                 )
-            # FIXME: I'm not sure we're missing local dependencies here...
         # Iterate over project names and instances
         for project in self._sequence:
             # Fetch the project workspace
@@ -269,8 +267,12 @@ class KRepo(BaseKRepo):
             for name, project in self.projects.items()
         }
 
-    def get_single_project_dependencies(self, name: str) -> ProjectDependencies:
-        deps = self.get_projects_dependencies(include=[name])
+    def get_single_project_dependencies(
+        self, name: str, lock_versions: bool = True
+    ) -> ProjectDependencies:
+        deps = self.get_projects_dependencies(
+            include=[name], lock_versions=lock_versions
+        )
         return deps[name]
 
     def get_projects_dependencies(
@@ -278,25 +280,18 @@ class KRepo(BaseKRepo):
         workspaces: Optional[Iterable[str]] = None,
         include: Optional[Iterable[str]] = None,
         exclude: Optional[Iterable[str]] = None,
-        editable: bool = False,
+        lock_versions: bool = True,
     ) -> Dict[str, ProjectDependencies]:
         """Get all informations related to projects dependencies"""
         dependencies: Dict[str, ProjectDependencies] = {}
         for project in self.list_projects(
             workspaces=workspaces, include=include, exclude=exclude
         ):
-            if editable:
-                (
-                    project_deps,
-                    project_extras,
-                    project_groups,
-                ) = project.get_install_dependencies()
-            else:
-                (
-                    project_deps,
-                    project_extras,
-                    project_groups,
-                ) = project.get_build_dependencies()
+            (
+                project_deps,
+                project_extras,
+                project_groups,
+            ) = project.get_build_dependencies(lock_versions=lock_versions)
             repo_deps = self.get_group_dependencies(project.name)
             project_python = project_deps.pop("python", None)
             repo_python = repo_deps.pop("python", None)
@@ -415,6 +410,13 @@ class KRepo(BaseKRepo):
         )
         return LockFile(packages=locked_packages, metadata=locked_metadata)
 
+    def get_packages_constraints(self) -> Dict[str, str]:
+        return {
+            dep_name: dep.version or "*"
+            for group in self.get_all_group_dependencies().values()
+            for dep_name, dep in group.items()
+        }
+
     def get_locked_version(self, package: str) -> str:
         lpackage = package.lower()
         if lpackage in self.packages_lock.packages:
@@ -447,113 +449,6 @@ class KRepo(BaseKRepo):
             await self.poetry_remove(deps, group=group, raise_on_error=True)
         self.refresh()
 
-    async def install_poetry_projects(
-        self,
-        include_projects: List[str],
-        exclude_projects: Optional[Iterable[str]] = None,
-        include_groups: Optional[Iterable[str]] = None,
-        exclude_groups: Optional[Iterable[str]] = None,
-        only_groups: Optional[Iterable[str]] = None,
-        default: bool = False,
-        timeout: Optional[float] = None,
-        deadline: Optional[float] = None,
-        clean: bool = True,
-        update_venv: bool = False,
-    ) -> List[Command]:
-        if update_venv:
-            await self.update_venv()
-        else:
-            await self.ensure_venv()
-        # Make sure to add missing dependencies
-        try:
-            # Compute deadline to use to enforce timeouts
-            deadline = get_deadline(timeout, deadline)
-            # Get list of projects to install
-            projects_names = [
-                project.name
-                for project in self.list_projects(
-                    include=include_projects, exclude=exclude_projects
-                )
-            ]
-            # Get projects not required
-            exclude_projects = set(self.projects_names).difference(projects_names)
-            # Perform first round of install
-            await self.poetry_install(
-                exclude_groups=exclude_projects,
-                raise_on_error=True,
-                deadline=deadline,
-            )
-            # List of all results
-            all_results: List[Command] = []
-            # Denote first group of packages
-            first = True
-            # Iterate over concurrent sequences
-            for projects in self.get_projects_stack(
-                include=include_projects, exclude=exclude_projects
-            ):
-                if first:
-                    # Create a variable which will hold results for this round of projects
-                    results: List[Command] = []
-                    # Create a task group to coordinate installs
-                    async with create_task_group() as tg:
-                        # Iterate over each project
-                        for project in projects:
-                            # Define function to perform install
-                            async def install_project(project: KProject) -> None:
-                                nonlocal results
-                                print(f"Starting install for {project.name}")
-                                cmd = await project.pep_660_install(
-                                    exclude_groups=exclude_groups,
-                                    include_groups=include_groups,
-                                    only_groups=only_groups,
-                                    default=default,
-                                    deadline=deadline,
-                                    raise_on_error=False,
-                                    clean=False,
-                                )
-                                if cmd:
-                                    results.append(cmd)
-                                if cmd is None or cmd.code == 0:
-                                    print(f"Sucessfully installed {project.name}")
-                                else:
-                                    print(f"Failed  to install {project.name}")
-                                    print("Captured stdout:")
-                                    print(cmd.stdout)
-                                    print("Captured stderr:", file=sys.stderr)
-                                    print(cmd.stderr, file=sys.stderr)
-
-                            if first:
-                                # Kick off install
-                                tg.start_soon(
-                                    install_project,
-                                    project,
-                                    name=f"install-{project.name}",
-                                )
-                    # Extend all results
-                    all_results.extend(results)
-                    # We can no longer run things in // 😓
-                    first = False
-                else:
-                    for project in projects:
-                        print(f"Starting install for {project.name}")
-                        cmd = await project.poetry_install(
-                            exclude_groups=exclude_groups,
-                            include_groups=include_groups,
-                            only_groups=only_groups,
-                            default=default,
-                            deadline=deadline,
-                            raise_on_error=False,
-                            clean=False,
-                        )
-                        if cmd:
-                            all_results.append(cmd)
-            # Return all results
-            return all_results
-        # Always clean files if required
-        finally:
-            if clean:
-                self.clean_pyproject_files()
-
     async def install_editable_projects(
         self,
         include_projects: Optional[List[str]] = None,
@@ -561,7 +456,11 @@ class KRepo(BaseKRepo):
         include_groups: Optional[Iterable[str]] = None,
         exclude_groups: Optional[Iterable[str]] = None,
         only_groups: Optional[Iterable[str]] = None,
+        lock_versions: bool = True,
         default: bool = False,
+        no_root: bool = False,
+        force: bool = False,
+        pip_quiet: bool = True,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
         clean: bool = True,
@@ -572,7 +471,7 @@ class KRepo(BaseKRepo):
         else:
             await self.ensure_venv(raise_on_error=True)
         # Create concurrency limiter
-        limiter = CapacityLimiter(8)
+        limiter = CapacityLimiter(12)
         try:
             # Compute deadline to use to enforce timeouts
             deadline = get_deadline(timeout, deadline)
@@ -583,48 +482,60 @@ class KRepo(BaseKRepo):
                     include=include_projects, exclude=exclude_projects
                 )
             ]
-            # Get projects not required
-            exclude_projects = set(self.projects_names).difference(projects_names)
-            # Perform first round of install
-            await self.poetry_install(
-                exclude_groups=exclude_projects,
-                raise_on_error=True,
-                deadline=deadline,
-            )
+            if not no_root:
+                # Perform first round of install
+                await self.poetry_install(
+                    include_groups=projects_names,
+                    raise_on_error=True,
+                    deadline=deadline,
+                )
             # List of all results
             all_results: List[Command] = []
-            # Iterate over concurrent sequences
-            for projects in self.get_projects_stack(
+            all_projects = self.get_projects_stack(
                 include=include_projects, exclude=exclude_projects
-            ):
-                # Create a variable which will hold results for this round of projects
-                results: List[Command] = []
-                # Create a task group to coordinate installs
+            )
+            # Iterate over concurrent sequences
+            project_idx = 0
+            total_projects = sum([len(projects) for projects in all_projects])
+            total_steps = len(all_projects)
+            for idx, projects in enumerate(all_projects):
                 async with create_task_group() as tg:
+                    # Create a variable which will hold results for this round of projects
+                    results: List[Command] = []
+                    # Create a task group to coordinate installs
                     # Iterate over each project
                     for project in projects:
-                        print(f"Starting install for {project.name}")
+                        project_idx += 1
 
                         # Define function to perform install
                         async def install_project(project: KProject) -> None:
                             nonlocal results
                             async with limiter:
-                                cmd = await project.pep_660_install(
+                                cmd = await project.install(
                                     exclude_groups=exclude_groups,
                                     include_groups=include_groups,
                                     only_groups=only_groups,
                                     default=default,
+                                    lock_versions=lock_versions,
+                                    force=force,
                                     deadline=deadline,
                                     raise_on_error=True,
+                                    quiet=pip_quiet,
                                     clean=False,
                                 )
                                 if cmd:
                                     results.append(cmd)
 
                         # Kick off install
+                        # tg.start_soon(
+                        #     install_project, project, name=f"install-{project.name}"
+                        # )
                         tg.start_soon(
                             install_project, project, name=f"install-{project.name}"
                         )
+                    logger.info(
+                        f"Installing projects (steps={idx+1}/{total_steps} pkgs={project_idx}/{total_projects}): {[p.name for p in projects]}"
+                    )
                 # Extend all results
                 all_results.extend(results)
             # Return all results
@@ -634,11 +545,38 @@ class KRepo(BaseKRepo):
             if clean:
                 self.clean_pyproject_files()
 
+    async def uninstall_editable_projects(
+        self,
+        include_projects: Optional[List[str]] = None,
+        exclude_projects: Optional[Iterable[str]] = None,
+        pip_quiet: bool = True,
+        timeout: Optional[float] = None,
+        deadline: Optional[float] = None,
+    ) -> Command:
+        # Create concurrency limiter
+        # Get list of projects to install
+        projects_names = [
+            project.name
+            for project in self.list_projects(
+                include=include_projects, exclude=exclude_projects
+            )
+        ]
+        # Perform first round of install
+        return await self.pip_remove(
+            *projects_names,
+            quiet=pip_quiet,
+            raise_on_error=True,
+            timeout=timeout,
+            deadline=deadline,
+        )
+
     async def build_projects(
         self,
         include_projects: List[str],
         exclude_projects: Optional[Iterable[str]] = None,
         env: Optional[Mapping[str, str]] = None,
+        pip_quiet: bool = True,
+        lock_versions: bool = True,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
         clean: bool = True,
@@ -661,25 +599,23 @@ class KRepo(BaseKRepo):
                 async def build_project(project: KProject) -> None:
                     nonlocal results
                     async with limiter:
-                        try:
-                            cmd = await project.build(
-                                env=env,
-                                deadline=deadline,
-                                raise_on_error=True,
-                                clean=clean,
-                            )
-                        except Exception as err:
-                            logger.error(
-                                f"Failed to build {project.name}", exc_info=err
-                            )
-                            return
+                        cmd = await project.build(
+                            env=env,
+                            lock_versions=lock_versions,
+                            deadline=deadline,
+                            quiet=pip_quiet,
+                            raise_on_error=True,
+                            clean=clean,
+                            recurse=False,
+                        )
                         results.append(cmd)
-                        if cmd.code == 0:
-                            print(f"Sucessfully built {project.name}")
-                            for file in Path(project.root / "dist").glob("*.whl"):
-                                shutil.copy2(file, dist_root.as_posix())
-                        else:
-                            print(f"Failed to build {project.name}")
+                        wheels = list(Path(project.root / "dist").glob("*.whl"))
+                        logger.info(
+                            f"Sucessfully built {project.name}",
+                            files=[w.relative_to(self.root).as_posix() for w in wheels],
+                        )
+                        for wheel in wheels:
+                            shutil.copy2(wheel, dist_root.as_posix())
 
                 # Kick off install
                 tg.start_soon(build_project, project, name=f"build-{project.name}")
@@ -693,7 +629,9 @@ class KRepo(BaseKRepo):
 
     def clean(self, remove_venv: bool = False) -> None:
         """Remove well-known non versioned files"""
-        to_remove = [expr for expr in self.gitignore if expr not in (".venv", ".venv/")]
+        to_remove = [
+            expr for expr in self.gitignore if expr not in (".venv", ".venv/", ".git")
+        ]
         # Remove venv
         if remove_venv:
             shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)

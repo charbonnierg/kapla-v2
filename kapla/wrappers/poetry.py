@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Union
 
 from kapla.core.cmd import Command
+from kapla.core.logger import logger
 
 
 async def build(
@@ -18,7 +19,6 @@ async def build(
 ) -> Command:
     if "rc" not in kwargs and raise_on_error:
         kwargs["rc"] = 0
-
     cmd = Command(
         "poetry build",
         cwd=directory,
@@ -86,6 +86,7 @@ async def install(
     if extras:
         cmd.add_option("--extras")
 
+    logger.debug("Installing using poetry", cmd=cmd.cmd)
     return await cmd.run()
 
 

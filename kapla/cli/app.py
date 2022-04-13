@@ -15,11 +15,11 @@ from .project import (
     do_create_new_project,
     do_install_project,
     do_remove_dependency,
-    do_show_dependencies,
     do_write_project,
     set_project_parser,
 )
 from .run import do_run_cmd, set_run_parser
+from .uninstall import do_uninstall, set_uninstall_parser
 from .venv import do_ensure_venv, do_venv_update, set_venv_parser
 
 parent_parser = argparse.ArgumentParser(add_help=False)
@@ -34,6 +34,7 @@ set_project_parser(command_subparser, parent=parent_parser)
 set_list_parser(command_subparser, parent=parent_parser)
 set_licenses_parser(command_subparser, parent=parent_parser)
 set_repair_parser(command_subparser, parent=parent_parser)
+set_uninstall_parser(command_subparser, parent=parent_parser)
 
 
 def app() -> None:
@@ -42,6 +43,9 @@ def app() -> None:
 
     if args.command == "install":
         do_install(args)
+
+    if args.command == "uninstall":
+        do_uninstall(args)
 
     elif args.command == "build":
         do_build(args)
@@ -66,10 +70,7 @@ def app() -> None:
 
     elif args.command == "project":
 
-        if args.action == "show":
-            do_show_dependencies(args)
-
-        elif args.action == "write":
+        if args.action == "write":
             do_write_project(args)
 
         elif args.action == "build":

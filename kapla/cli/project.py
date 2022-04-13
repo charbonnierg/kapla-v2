@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from argparse import ArgumentParser, _SubParsersAction
 from functools import partial
 from pathlib import Path
@@ -7,47 +8,19 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from anyio import run
 
+from kapla.core.errors import CommandFailedError
+from kapla.core.logger import logger
 from kapla.projects.krepo import KRepo
 from kapla.specs.kproject import KProjectSpec
 
 
-def set_show_parser(parser: ArgumentParser) -> None:
-    parser.add_argument(
-        "-g",
-        "--group",
-        "--with",
-        "--include-group",
-        dest="include_groups",
-        nargs="+",
-    )
-    parser.add_argument(
-        "--without",
-        "--exclude-group",
-        dest="exclude_groups",
-        nargs="+",
-    )
-    parser.add_argument(
-        "--only", "--only-group", action="append", dest="only_groups", nargs="+"
-    )
-    parser.add_argument(
-        "--outdated", action="store_true", default=False, dest="outdated"
-    )
-    parser.add_argument("--tree", action="store_true", default=False, dest="tree")
-    parser.add_argument(
-        "--latest",
-        action="store_true",
-        default=False,
-        dest="latest",
-    )
-    parser.add_argument("--default", action="store_true", default=False, dest="default")
-
-
 def set_write_parser(parser: ArgumentParser) -> None:
-    parser.add_argument("--develop", "-e", action="store_true", default=False)
+    parser.add_argument("--lock", "-l", action="store_true", default=True)
     parser.add_argument("--path", required=False, default=None)
 
 
 def set_build_parser(parser: ArgumentParser) -> None:
+    parser.add_argument("--lock", "-l", action="store_true", default=True)
     parser.add_argument(
         "--no-clean", action="store_true", default=False, dest="no_clean"
     )
@@ -59,28 +32,25 @@ def set_new_parser(parser: ArgumentParser) -> None:
 
 def set_install_parser(parser: ArgumentParser) -> None:
     parser.add_argument(
-        "-g",
-        "--group",
         "--with",
-        "--include-group",
+        "--include",
         dest="include_groups",
         nargs="+",
     )
     parser.add_argument(
         "--without",
-        "--exclude-group",
+        "--exclude",
         dest="exclude_groups",
         nargs="+",
     )
-    parser.add_argument(
-        "-o", "--only", "--only-group", action="append", dest="only_groups", nargs="+"
-    )
+    parser.add_argument("-o", "--only", action="append", dest="only_groups", nargs="+")
     parser.add_argument(
         "-d", "--default", action="store_true", default=False, dest="default"
     )
     parser.add_argument(
         "--no-clean", action="store_true", default=False, dest="no_clean"
     )
+    parser.add_argument("--lock", "-l", action="store_true", default=False)
 
 
 def add_remove_parser(parser: ArgumentParser) -> None:
@@ -120,6 +90,13 @@ def set_docker_parser(parser: ArgumentParser) -> None:
     parser.add_argument("--no-build-dist", action="store_true", default=False)
     parser.add_argument("--build-arg", nargs="+", action="append", dest="build_arg")
     parser.add_argument("--platform", nargs="+", action="append", dest="platform")
+    parser.add_argument(
+        "--lock",
+        "-l",
+        help="Lock packages version. Ignored when --no-build-dist is used",
+        action="store_true",
+        default=True,
+    )
 
 
 def set_project_parser(
@@ -129,9 +106,6 @@ def set_project_parser(
     project_actions_subparser = project_parser.add_subparsers(
         title="project", dest="action"
     )
-
-    show_parser = project_actions_subparser.add_parser("show", parents=[parent])
-    set_show_parser(show_parser)
 
     write_parser = project_actions_subparser.add_parser("write", parents=[parent])
     set_write_parser(write_parser)
@@ -163,6 +137,7 @@ def do_build_docker(args: Any) -> None:
     no_build_dist: bool = args.no_build_dist
     build_args: List[List[str]] = args.build_arg
     platforms: List[List[str]] = args.platform
+    lock_versions: bool = args.lock
 
     parsed_build_args: Dict[str, str] = {}
     for build_arg in build_args or []:
@@ -172,13 +147,6 @@ def do_build_docker(args: Any) -> None:
     parsed_platforms: List[str] = []
     for platform in platforms or []:
         parsed_platforms.append(platform[0])
-
-    from structlog import get_logger
-
-    logger = get_logger()
-    logger.warning(
-        "Parsed options", build_args=parsed_build_args, platforms=parsed_platforms
-    )
 
     repo = KRepo.find_current()
     project = repo.find_current_project()
@@ -191,9 +159,15 @@ def do_build_docker(args: Any) -> None:
         platforms=parsed_platforms,
         output_dir=output_dir,
         build_dist=False if no_build_dist else True,
+        lock_versions=lock_versions,
+        raise_on_error=True,
     )
 
-    run(docker_func)
+    try:
+        run(docker_func)
+    except CommandFailedError:
+        logger.error("Build failed")
+        sys.exit(1)
 
 
 def do_remove_dependency(args: Any) -> None:
@@ -246,50 +220,22 @@ def do_add_dependency(args: Any) -> None:
     run(add_func)
 
 
-def do_show_dependencies(args: Any) -> None:
-    # Parse args
-    include_groups: Optional[Tuple[str]] = args.include_groups
-    exclude_groups: Optional[Tuple[str]] = args.exclude_groups
-    only_groups: Optional[Tuple[str]] = args.only_groups
-    default: bool = args.default
-    tree: bool = args.tree
-    latest: bool = args.latest
-    outdated: bool = args.outdated
-    # Find repo
-    repo = KRepo.find_current()
-    # Find project
-    project = repo.find_current_project()
-    # Create func
-    show_func = partial(
-        project.show,
-        include_groups=include_groups,
-        exclude_groups=exclude_groups,
-        only_groups=only_groups,
-        default=default,
-        tree=tree,
-        latest=latest,
-        outdated=outdated,
-    )
-    # Update project
-    run(show_func)
-
-
 def do_write_project(args: Any) -> None:
     # Parse args
-    develop: bool = args.develop
+    lock_versions: bool = args.lock
     path: str = args.path
     # Find repo
     repo = KRepo.find_current()
     # Find project
     project = repo.find_current_project()
     # Write pyproject
-    project.write_pyproject(path, develop=develop)
+    project.write_pyproject(path, lock_versions=lock_versions)
 
 
 def do_build_project(args: Any) -> None:
     # Parse arguments
     clean: bool = not args.no_clean
-
+    lock_versions: bool = args.lock
     # Find repo
     repo = KRepo.find_current()
     # Find project
@@ -297,6 +243,7 @@ def do_build_project(args: Any) -> None:
     # Define function to perform build
     build = partial(
         project.build,
+        lock_versions=lock_versions,
         clean=clean,
     )
 
@@ -310,6 +257,7 @@ def do_install_project(args: Any) -> None:
     only_groups: Optional[Tuple[str]] = args.only_groups
     default: bool = args.default
     clean: bool = not args.no_clean
+    lock_versions: bool = args.lock
     # Find repo
     repo = KRepo.find_current()
     # Find project
@@ -322,6 +270,7 @@ def do_install_project(args: Any) -> None:
         exclude_groups=exclude_groups,
         only_groups=only_groups,
         default=default,
+        lock_versions=lock_versions,
         clean=clean,
     )
     run(install_func)

@@ -36,6 +36,23 @@ def set_install_parser(parser: _SubParsersAction[Any], parent: ArgumentParser) -
         nargs="+",
     )
     install_parser.add_argument(
+        "-l", "--lock", action="store_true", default=False, dest="lock_versions"
+    )
+    install_parser.add_argument(
+        "--force",
+        "-f",
+        dest="force",
+        action="store_true",
+        default=False,
+    )
+    install_parser.add_argument(
+        "--verbose",
+        "-v",
+        dest="verbose",
+        action="store_true",
+        default=False,
+    )
+    install_parser.add_argument(
         "-o", "--only", "--only-group", action="append", dest="only_groups", nargs="+"
     )
     install_parser.add_argument(
@@ -49,6 +66,9 @@ def set_install_parser(parser: _SubParsersAction[Any], parent: ArgumentParser) -
     )
     install_parser.add_argument(
         "--no-clean", action="store_true", default=False, dest="no_clean"
+    )
+    install_parser.add_argument(
+        "--no-root", action="store_true", default=False, dest="no_root"
     )
 
 
@@ -65,6 +85,10 @@ def do_install(args: Any) -> None:
     update_venv: bool = args.update_venv
     recreate_venv: bool = args.recreate_venv
     clean: bool = not args.no_clean
+    no_root: bool = args.no_root
+    force: bool = args.force
+    quiet: bool = not args.verbose
+    lock_versions: bool = args.lock_versions
     # Find repo
     repo = KRepo.find_current()
     # Check if we should delete venv
@@ -81,6 +105,10 @@ def do_install(args: Any) -> None:
         include_groups=include_groups,
         only_groups=only_groups,
         default=default,
+        lock_versions=lock_versions,
+        no_root=no_root,
+        force=force,
+        pip_quiet=quiet,
         update_venv=update_venv,
         clean=clean,
     )

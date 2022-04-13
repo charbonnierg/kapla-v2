@@ -29,7 +29,6 @@ from anyio.abc import Process
 from anyio.streams.buffered import BufferedByteReceiveStream
 
 from .errors import CommandFailedError, CommandNotFoundError
-from .logger import logger
 from .timeout import get_deadline, get_event_loop_time, get_timeout
 from .windows import IS_WINDOWS
 
@@ -251,9 +250,6 @@ class Command:
         # Enter the exit stack
         await self._exitstack.__aenter__()
         # Enter process async manager
-        log_options = self.options.copy()
-        log_options.pop("env", None)
-        logger.debug("Running command", **log_options)
         try:
             self.process: Process = await self._exitstack.enter_async_context(
                 await open_process(**self.options)

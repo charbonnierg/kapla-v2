@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 
 from kapla.core.cmd import Command, check_command, run_command
 from kapla.core.finder import DEFAULT_GITIGNORE, find_files
+from kapla.core.logger import logger
 from kapla.core.windows import IS_WINDOWS
 from kapla.wrappers.git import GitInfos, get_branch, get_commit, get_infos, get_tag
 
@@ -150,6 +152,19 @@ class BasePythonProject(BaseProject[SpecT]):
             return self.venv_path / "Scripts"
         else:
             return self.venv_path / "bin"
+
+    @property
+    def venv_site_packages(self) -> Path:
+        """Return path to virtualenv bin directory"""
+        if IS_WINDOWS:
+            return self.venv_path / "Lib" / "site-packages"
+        else:
+            return (
+                self.venv_path
+                / "lib"
+                / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                / "site-packages"
+            )
 
     @property
     def python_executable(self) -> str:
@@ -327,6 +342,8 @@ class BasePythonProject(BaseProject[SpecT]):
             quiet=quiet,
             **kwargs,
         )
+        # Remove broken packages
+        self.remove_broken_packages()
         # Update pip using executable
         await self.pip_update(
             "pip",
@@ -357,7 +374,15 @@ class BasePythonProject(BaseProject[SpecT]):
                 deadline=deadline,
                 **kwargs,
             )
+        else:
+            self.remove_broken_packages()
 
     def remove_venv(self) -> None:
         """Remove virtual environment"""
         shutil.rmtree(self.venv_path, ignore_errors=True)
+
+    def remove_broken_packages(self) -> None:
+        broken_paths = self.venv_site_packages.glob("./~*")
+        for path in broken_paths:
+            logger.warning(f"Removing broken install: {path.resolve(True).as_posix()}")
+            shutil.rmtree(path, ignore_errors=True)
