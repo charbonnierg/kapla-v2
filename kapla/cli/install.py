@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from argparse import ArgumentParser, _SubParsersAction
 from functools import partial
+import sys
 from typing import Any, Optional, Tuple
 
 from anyio import run
 
+from kapla.core.logger import logger
+from kapla.core.errors import CommandFailedError
 from kapla.projects.krepo import KRepo
 
 
@@ -113,4 +116,8 @@ def do_install(args: Any) -> None:
         clean=clean,
     )
     # Run install
-    run(install)
+    try:
+        run(install)
+    except CommandFailedError:
+        logger.error("Install failed")
+        sys.exit(1)

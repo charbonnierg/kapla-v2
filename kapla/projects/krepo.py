@@ -179,13 +179,19 @@ class KRepo(BaseKRepo):
             # Iterate over included projects
             for project_name in include:
                 # Local dependencies of local projects must be included
-                must_install.update(self._projects_local_dependencies[project_name])
+                try:
+                    must_install.update(self._projects_local_dependencies[project_name])
+                except KeyError:
+                    continue
             # Use list to get a copy of the set and avoid mutating the same object we're iterating upon
             for project_name in list(must_install):
                 # As well as local dependencies of local dependencies
-                must_install.update(
-                    self.projects[project_name].get_local_dependencies_names()
-                )
+                try:
+                    must_install.update(
+                        self.projects[project_name].get_local_dependencies_names()
+                    )
+                except KeyError:
+                    continue
         # Iterate over project names and instances
         for project in self._sequence:
             # Fetch the project workspace
@@ -552,7 +558,7 @@ class KRepo(BaseKRepo):
         pip_quiet: bool = True,
         timeout: Optional[float] = None,
         deadline: Optional[float] = None,
-    ) -> Command:
+    ) -> Optional[Command]:
         # Create concurrency limiter
         # Get list of projects to install
         projects_names = [
@@ -561,14 +567,16 @@ class KRepo(BaseKRepo):
                 include=include_projects, exclude=exclude_projects
             )
         ]
-        # Perform first round of install
-        return await self.pip_remove(
-            *projects_names,
-            quiet=pip_quiet,
-            raise_on_error=True,
-            timeout=timeout,
-            deadline=deadline,
-        )
+        if projects_names:
+            # Perform first round of install
+            return await self.pip_remove(
+                *projects_names,
+                quiet=pip_quiet,
+                raise_on_error=True,
+                timeout=timeout,
+                deadline=deadline,
+            )
+        return None
 
     async def build_projects(
         self,

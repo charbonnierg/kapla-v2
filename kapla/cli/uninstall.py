@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from argparse import ArgumentParser, _SubParsersAction
 from functools import partial
+import sys
 from typing import Any, Optional, Tuple
 
 from anyio import run
-
+from kapla.core.errors import CommandFailedError
+from kapla.core.logger import logger
 from kapla.projects.krepo import KRepo
 
 
@@ -49,4 +51,8 @@ def do_uninstall(args: Any) -> None:
         pip_quiet=quiet,
     )
     # Run install
-    run(uninstall)
+    try:
+        run(uninstall)
+    except CommandFailedError:
+        logger.error("Failed to uninstall package")
+        sys.exit(1)

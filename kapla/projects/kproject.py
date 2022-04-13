@@ -750,6 +750,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                         continue
                     for filepath in Path(dep.root, "dist").glob("*.whl"):
                         shutil.copy2(filepath, dist_root)
+            logger.warning("Invoking docker command", command=cmd.cmd)
             # Run docker build command
             return await cmd.run()
         finally:

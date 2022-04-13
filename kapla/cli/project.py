@@ -183,9 +183,13 @@ def do_remove_dependency(args: Any) -> None:
         package=package,
         group=group,
         dry_run=dry_run,
+        raise_on_error=True,
     )
 
-    run(remove_func)
+    try:
+        run(remove_func)
+    except CommandFailedError:
+        logger.error("Failed to remove dependency")
 
 
 def do_add_dependency(args: Any) -> None:
@@ -217,7 +221,11 @@ def do_add_dependency(args: Any) -> None:
         dry_run=dry_run,
     )
 
-    run(add_func)
+    try:
+        run(add_func)
+    except CommandFailedError:
+        logger.error("Failed to add dependency")
+        sys.exit(1)
 
 
 def do_write_project(args: Any) -> None:
@@ -248,7 +256,11 @@ def do_build_project(args: Any) -> None:
     )
 
     # Run build
-    run(build)
+    try:
+        run(build)
+    except CommandFailedError:
+        logger.error("Failed to build project")
+        sys.exit(1)
 
 
 def do_install_project(args: Any) -> None:
@@ -273,7 +285,11 @@ def do_install_project(args: Any) -> None:
         lock_versions=lock_versions,
         clean=clean,
     )
-    run(install_func)
+    try:
+        run(install_func)
+    except CommandFailedError:
+        logger.error("Failed to install package")
+        sys.exit(1)
 
 
 def do_create_new_project(args: Any) -> None:
