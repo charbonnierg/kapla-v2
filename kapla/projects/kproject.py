@@ -68,6 +68,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         super().__init__(filepath)
         self.repo = repo
         self.workspace = workspace
+        if self.spec.version is None and self.repo is not None:
+            self.spec.version = self.repo.version
 
     @property
     def venv_path(self) -> Path:
@@ -104,7 +106,11 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     @property
     def version(self) -> str:
         """The project version"""
-        return self.spec.version
+        if self.spec.version:
+            return self.spec.version
+        if self.repo:
+            return self.repo.version
+        return ""
 
     def is_already_installed(self) -> bool:
         if self.repo:

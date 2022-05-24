@@ -17,6 +17,8 @@ class DockerSpec(AliasedModel):
 
 
 class KProjectSpec(BasePythonConfig):
+    # Docs: <https://python-poetry.org/docs/pyproject/#version>
+    version: Optional[str] = None
     dependencies: List[Union[str, Dict[str, DepedencyMeta]]] = []
     docker: Optional[DockerSpec] = None
     # Docs: <https://python-poetry.org/docs/pyproject/#extras>

@@ -410,7 +410,7 @@ class KRepo(BaseKRepo):
             locked_metadata = None
         locked_packages.update(
             {
-                name: {"name": name, "version": project.spec.version}
+                name: {"name": name, "version": project.version}
                 for name, project in self.get_projects().items()
             }
         )

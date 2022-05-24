@@ -34,7 +34,7 @@ class BasePythonConfig(AliasedModel):
     # Docs: <https://python-poetry.org/docs/pyproject/#name>
     name: str
     # Docs: <https://python-poetry.org/docs/pyproject/#version>
-    version: str
+    version: Optional[str] = None
     # Docs: <https://python-poetry.org/docs/pyproject/#description>
     description: Optional[str] = None
     # Docs: <https://python-poetry.org/docs/pyproject/#license>
