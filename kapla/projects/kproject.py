@@ -728,7 +728,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 ).as_posix(),
             )
             if platforms:
-                platform = list(set(spec.platforms).union(platforms))
+                platform = list(platforms)
             else:
                 platform = spec.platforms
             if platform:
