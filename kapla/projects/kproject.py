@@ -625,6 +625,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         push: bool = False,
         build_args: Optional[Dict[str, str]] = None,
         platforms: Optional[List[str]] = None,
+        suffix: Optional[str] = None,
         output_dir: Union[str, Path, None] = None,
         build_dist: bool = True,
         lock_versions: bool = True,
@@ -637,6 +638,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         **kwargs: Any,
     ) -> Command:
         """Build docker image for the projcet according to the project spec."""
+        suffix = suffix or ""
         # Gather deadline
         deadline = get_deadline(timeout, deadline)
         kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
@@ -709,7 +711,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             if git_infos.commit:
                 cmd.add_option("--label", f"git.commit={git_infos.commit}")
             # Add tag
-            cmd.add_option("--tag", ":".join([spec.image, tag]))
+            cmd.add_option("--tag", ":".join([spec.image + suffix, tag]))
             if load:
                 cmd.add_option("--load")
             if push:

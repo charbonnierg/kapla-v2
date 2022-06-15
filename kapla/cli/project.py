@@ -84,6 +84,7 @@ def set_add_parser(parser: ArgumentParser) -> None:
 
 def set_docker_parser(parser: ArgumentParser) -> None:
     parser.add_argument("--tag", required=False, default=None)
+    parser.add_argument("--suffix", required=False, default=None)
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--push", action="store_true", default=False)
     parser.add_argument("--output-dir", "-o", required=False, default=None)
@@ -138,6 +139,7 @@ def do_build_docker(args: Any) -> None:
     build_args: List[List[str]] = args.build_arg
     platforms: List[List[str]] = args.platform
     lock_versions: bool = args.lock
+    suffix: Optional[str] = args.suffix
 
     parsed_build_args: Dict[str, str] = {}
     for build_arg in build_args or []:
@@ -153,6 +155,7 @@ def do_build_docker(args: Any) -> None:
     docker_func = partial(
         project.build_docker,
         tag=tag,
+        suffix=suffix,
         load=load,
         push=push,
         build_args=parsed_build_args,

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import sys
 from argparse import ArgumentParser, _SubParsersAction
 from functools import partial
-import sys
 from typing import Any, Optional, Tuple
 
 from anyio import run
+
 from kapla.core.errors import CommandFailedError
 from kapla.core.logger import logger
 from kapla.projects.krepo import KRepo
