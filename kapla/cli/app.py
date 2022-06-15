@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-
+from pkg_resources import get_distribution
 from kapla.cli.licenses import do_show_licenses, set_licenses_parser
 from kapla.cli.list import do_list_projects, set_list_parser
 from kapla.cli.repair import do_repair, set_repair_parser
@@ -22,9 +22,13 @@ from .run import do_run_cmd, set_run_parser
 from .uninstall import do_uninstall, set_uninstall_parser
 from .venv import do_ensure_venv, do_venv_update, set_venv_parser
 
+__version__ = get_distribution("kapla-cli-v2").version
+
 parent_parser = argparse.ArgumentParser(add_help=False)
 main_parser = argparse.ArgumentParser(add_help=True)
 command_subparser = main_parser.add_subparsers(title="command", dest="command")
+
+main_parser.add_argument('--version', '-V', action='version', version=__version__)
 
 set_install_parser(command_subparser, parent=parent_parser)
 set_run_parser(command_subparser, parent=parent_parser)
