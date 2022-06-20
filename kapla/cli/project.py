@@ -83,6 +83,7 @@ def set_add_parser(parser: ArgumentParser) -> None:
 
 
 def set_docker_parser(parser: ArgumentParser) -> None:
+    parser.add_argument("--show-tag", action="store_true", default=None)
     parser.add_argument("--tag", required=False, default=None)
     parser.add_argument("--suffix", required=False, default=None)
     parser.add_argument("--load", action="store_true", default=False)
@@ -131,6 +132,7 @@ def set_project_parser(
 
 
 def do_build_docker(args: Any) -> None:
+    show_tag: bool = args.show_tag
     tag: Optional[str] = args.tag
     load: bool = args.load
     push: bool = args.push
@@ -140,6 +142,15 @@ def do_build_docker(args: Any) -> None:
     platforms: List[List[str]] = args.platform
     lock_versions: bool = args.lock
     suffix: Optional[str] = args.suffix
+
+    if show_tag:
+        async def main() -> None:
+            repo = KRepo.find_current()
+            project = repo.find_current_project()
+            tag = await project.get_docker_tag()
+            print(tag)
+        run(main)
+        sys.exit(0)
 
     parsed_build_args: Dict[str, str] = {}
     for build_arg in build_args or []:

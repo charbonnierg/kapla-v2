@@ -31,6 +31,7 @@ from kapla.specs.pyproject import (
     PoetryConfig,
     PyProjectSpec,
 )
+from kapla.wrappers.git import GitInfos
 
 from ..core.cmd import Command, get_deadline
 from ..core.errors import CommandFailedError
@@ -618,6 +619,25 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 "It's not possible to remove dependencies to projet without parent repo"
             )
 
+    async def get_docker_tag(self, git_infos: Optional[GitInfos] = None) -> str:
+        # Gather git infos
+        git_infos = git_infos or await self.get_git_infos()
+        # Gather tag
+        # Check if it's a release
+        if git_infos.tag:
+            tag = git_infos.tag
+        # Use branch and commit if available
+        elif git_infos.branch and git_infos.commit:
+            tag = "-".join(
+                [git_infos.branch.split("/")[-1].lower(), git_infos.commit]
+            )
+        # Use commit only
+        elif git_infos.commit:
+            tag = git_infos.commit
+        else:
+            tag = "latest"
+        return tag
+
     async def build_docker(
         self,
         tag: Optional[str] = None,
@@ -642,28 +662,15 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         # Gather deadline
         deadline = get_deadline(timeout, deadline)
         kwargs["rc"] = kwargs.get("rc", 0 if raise_on_error else None)
-        # Gather git infos
-        git_infos = await self.get_git_infos()
-        # Gather tag
-        if tag is None:
-            # Check if it's a release
-            if git_infos.tag:
-                tag = git_infos.tag
-            # Use branch and commit if available
-            elif git_infos.branch and git_infos.commit:
-                tag = "-".join(
-                    [git_infos.branch.split("/")[-1].lower(), git_infos.commit]
-                )
-            # Use commit only
-            elif git_infos.commit:
-                tag = git_infos.commit
-            else:
-                tag = "latest"
         spec = self.spec.docker
         if not spec:
             raise ValueError("No docker spec found for project")
         if not self.repo:
             raise ValueError("Cannot build docker images without parent repo")
+        # Gather git infos
+        git_infos = await self.get_git_infos()
+        # Gather tag
+        tag = tag or await self.get_docker_tag(git_infos)
         template = spec.template or "library"
         template_file = "Dockerfile." + template
         template_path = self.repo.root / ".repo/templates/dockerfiles" / template_file
