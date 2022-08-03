@@ -38,6 +38,7 @@ from ..core.errors import CommandFailedError
 from ..core.finder import find_dirs, find_files
 from ..core.io import read_yaml, write_toml, write_yaml
 from ..core.logger import logger
+from ..core.templates import render_template
 from .base import BasePythonProject
 from .pyproject import KPyProject
 
@@ -628,9 +629,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             tag = git_infos.tag
         # Use branch and commit if available
         elif git_infos.branch and git_infos.commit:
-            tag = "-".join(
-                [git_infos.branch.split("/")[-1].lower(), git_infos.commit]
-            )
+            tag = "-".join([git_infos.branch.split("/")[-1].lower(), git_infos.commit])
         # Use commit only
         elif git_infos.commit:
             tag = git_infos.commit
@@ -672,10 +671,11 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         # Gather tag
         tag = tag or await self.get_docker_tag(git_infos)
         template = spec.template or "library"
+        template_args = spec.options or {}
         template_file = "Dockerfile." + template
         template_path = self.repo.root / ".repo/templates/dockerfiles" / template_file
         try:
-            shutil.copy2(template_path, self.root / "Dockerfile")
+            render_template(template_path, self.root / "Dockerfile", **template_args)
             cmd = Command(
                 "docker buildx build", deadline=deadline, quiet=quiet, **kwargs
             )

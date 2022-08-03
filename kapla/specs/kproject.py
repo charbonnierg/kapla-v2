@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Union
 
 from .base import AliasedModel
 from .common import BasePythonConfig
@@ -9,6 +9,7 @@ class DockerSpec(AliasedModel):
     image: str
     base_image: Optional[str] = None
     template: Optional[str] = None
+    options: Optional[Mapping[str, Any]] = None
     dockerfile: Optional[str] = None
     platforms: List[str] = ["linux/amd64"]
     context: str = "./"

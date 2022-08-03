@@ -65,7 +65,7 @@ class PyProject(
     @property
     def version(self) -> str:
         """The project version"""
-        return self.spec.tool.poetry.version
+        return self.spec.tool.poetry.version or ""
 
     def get_dependency(self, name: str) -> Optional[Dependency]:
         """Get a single dependency"""
