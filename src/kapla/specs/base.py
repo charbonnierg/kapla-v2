@@ -25,10 +25,10 @@ class AliasedModel(BaseModel):
         exclude_none: bool = True,
     ) -> DictStrAny:
         return super().dict(
-            include=include,  # type: ignore[arg-type]
-            exclude=exclude,  # type: ignore[arg-type]
+            include=include,
+            exclude=exclude,
             by_alias=by_alias,
-            skip_defaults=skip_defaults,  # type: ignore[arg-type]
+            skip_defaults=skip_defaults,
             exclude_unset=exclude_unset,
             exclude_defaults=exclude_defaults,
             exclude_none=exclude_none,
@@ -49,10 +49,10 @@ class AliasedModel(BaseModel):
         **dumps_kwargs: Any,
     ) -> str:
         return super().json(
-            include=include,  # type: ignore[arg-type]
-            exclude=exclude,  # type: ignore[arg-type]
+            include=include,
+            exclude=exclude,
             by_alias=by_alias,
-            skip_defaults=skip_defaults,  # type: ignore[arg-type]
+            skip_defaults=skip_defaults,
             exclude_unset=exclude_unset,
             exclude_defaults=exclude_defaults,
             exclude_none=exclude_none,

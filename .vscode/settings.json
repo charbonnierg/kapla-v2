@@ -8,6 +8,7 @@
         "**/__pycache__": true,
         "**/.mypy_cache": true,
         "**/.pytest_cache": true,
+        "**/*.egg-info": true,
         "**/.venv": true,
         "**/cov.xml": true,
         "**/junit-unit.xml": true,

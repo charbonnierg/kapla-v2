@@ -83,6 +83,6 @@ class PyProjectSpec(BasePyProjectSpec):
 DEFAULT_BUILD_SYSTEM = BuildSystem(
     build_backend="poetry.core.masonry.api",
     requires=[
-        "quara-poetry-core-next",
+        "poetry-core>=1.2.0",
     ],
 )

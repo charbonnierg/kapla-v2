@@ -438,6 +438,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         lock_versions: bool = True,
         force: bool = False,
         build_system: BuildSystem = DEFAULT_BUILD_SYSTEM,
+        build_isolation: bool = True,
         clean: bool = True,
         quiet: bool = False,
         raise_on_error: bool = False,
@@ -476,9 +477,11 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             lock_versions=lock_versions,
             build_system=build_system,
         ):
+            cmd = ["-e", target]
+            if not build_isolation:
+                cmd.append("--no-build-isolation")
             return await self.repo.pip_install(
-                "-e",
-                target,
+                *cmd,
                 quiet=quiet,
                 raise_on_error=raise_on_error,
                 timeout=timeout,

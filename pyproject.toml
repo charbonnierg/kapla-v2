@@ -1,43 +1,53 @@
-# Poetry pyrpoject.toml configuration file
-#
-# This file is used to declare kapla-cli python package
-#
-# Reference: https://python-poetry.org/docs/pyproject/
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
-[tool.poetry]
+[project]
 name = "kapla-cli-v2"
-version = "0.21.2"
-description = ""
-authors = ["charbonnierg <guillaume.charbonnier@araymond.com>"]
+authors = [
+    { author = "Guillaume Charbonnier", email = "guillaume.charbonnier@araymond.com" },
+]
+description = "Python monorepo package manager"
 readme = "README.md"
-packages = [{ include = "kapla" }]
+requires-python = ">=3.7"
+keywords = ["nats", "nats-server"]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+]
+dynamic = ["version"]
+dependencies = [
+    "graphlib-backport ; python_version < '3.9'",
+    "pydantic",
+    "anyio",
+    "ruamel.yaml",
+    "tomlkit",
+    "rich",
+    "structlog",
+    "chardet",
+    "Jinja2",
+]
 
-[tool.poetry.dependencies]
-python = "^3.7.1"
-graphlib-backport = { version = "^1.0.3", python = "<3.9" }
-pydantic = "^1.9.0"
-anyio = "^3.5.0"
-"ruamel.yaml" = "^0.17.20"
-tomlkit = "^0.9.2"
-rich = "^11.2.0"
-structlog = "^21.5.0"
-chardet = "^4.0.0"
-Jinja2 = "^3.1.2"
 
-[tool.poetry.group.dev.dependencies]
-mypy = "^0.931"
-isort = "^5.10.1"
-flake8 = "^4.0.1"
-black = "^22.1.0"
-types-toml = "^0.10.3"
-types-setuptools = "^57.4.9"
-types-chardet = "^4.0.3"
+[project.optional-dependencies]
+tests = ["pytest", "pytest-cov"]
+dev = [
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+    "types-toml",
+    "types-setuptools",
+    "types-chardet",
+]
 
-[tool.poetry.scripts]
+[project.urls]
+Repository = "https://github.com/charbonnierg/kapla-cli-v2"
+Issues = "https://github.com/charbonnierg/kapla-cli-v2/issues"
+
+[project.scripts]
 k = "kapla.cli:app"
 
-[build-system]
-requires = [
-    "poetry-core @ git+https://github.com/python-poetry/poetry-core.git@master",
-]
-build-backend = "poetry.core.masonry.api"
+[tool.setuptools.dynamic]
+version = { attr = "kapla.__version__" }
