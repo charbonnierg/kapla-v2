@@ -144,11 +144,13 @@ def do_build_docker(args: Any) -> None:
     suffix: Optional[str] = args.suffix
 
     if show_tag:
+
         async def main() -> None:
             repo = KRepo.find_current()
             project = repo.find_current_project()
             tag = await project.get_docker_tag()
             print(tag)
+
         run(main)
         sys.exit(0)
 

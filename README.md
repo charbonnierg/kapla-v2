@@ -6,7 +6,7 @@ It relies on:
   - venv
   - pip
   - poetry
-  - poetry-core @ master (pushed package from master branch as `quara-poetry-core-next` on 2022/03/03)
+  - poetry-core
 
 ## `poetry` and `pip` usage
 

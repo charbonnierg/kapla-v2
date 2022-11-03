@@ -128,7 +128,7 @@ class Command:
         if timeout is not ... and deadline is not ...:
             self._timeout = get_timeout(timeout, deadline)
             self._deadline = get_deadline(timeout, deadline)
-        elif timeout is not ...:
+        elif timeout is not ...:  # type: ignore[unreachable]
             self._timeout = get_timeout(timeout, None)
             self._deadline = get_deadline(timeout, None)
         elif deadline is not ...:
@@ -363,7 +363,7 @@ class Command:
                     text = chunk.decode(default_encoding)
                 self._stderr_read += text
                 if iscoroutinefunction(self._stderr_sink):
-                    await self._stderr_sink(text)  # type: ignore[misc]
+                    await self._stderr_sink(text)
                 elif self._stderr_sink:
                     self._stderr_sink(text)
 
@@ -379,7 +379,7 @@ class Command:
                     text = chunk.decode(default_encoding)
                 self._stdout_read += text
                 if iscoroutinefunction(self._stdout_sink):
-                    await self._stdout_sink(text)  # type: ignore[misc]
+                    await self._stdout_sink(text)
                 elif self._stdout_sink:
                     self._stdout_sink(text)
 

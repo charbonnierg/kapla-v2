@@ -73,6 +73,12 @@ def set_install_parser(parser: _SubParsersAction[Any], parent: ArgumentParser) -
     install_parser.add_argument(
         "--no-root", action="store_true", default=False, dest="no_root"
     )
+    install_parser.add_argument(
+        "--no-build-isolation",
+        action="store_true",
+        default=False,
+        dest="no_build_isolation",
+    )
 
 
 def do_install(args: Any) -> None:
@@ -92,6 +98,8 @@ def do_install(args: Any) -> None:
     force: bool = args.force
     quiet: bool = not args.verbose
     lock_versions: bool = args.lock_versions
+    build_isolation: bool = not args.no_build_isolation
+
     # Find repo
     repo = KRepo.find_current()
     # Check if we should delete venv
@@ -109,6 +117,7 @@ def do_install(args: Any) -> None:
         only_groups=only_groups,
         default=default,
         lock_versions=lock_versions,
+        build_isolation=build_isolation,
         no_root=no_root,
         force=force,
         pip_quiet=quiet,
