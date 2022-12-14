@@ -644,7 +644,7 @@ class KRepo(BaseKRepo):
         ]
         # Remove venv
         if remove_venv:
-            shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
+            shutil.rmtree(self.venv_path, ignore_errors=True)
         # clean monorepo
         for path in find_dirs(to_remove, self.root):
             shutil.rmtree(path, ignore_errors=True)

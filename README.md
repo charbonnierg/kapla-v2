@@ -104,3 +104,7 @@ k project install
 k project show [--latest] [--outdated] [--tree]
 ```
 
+
+## Configuration
+Respects the use of venv environment variable `VIRTUAL_ENV` for the location of 
+the virtual env should it be different from `<project_roo>/.venv`

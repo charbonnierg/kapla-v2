@@ -777,7 +777,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     def clean(self) -> None:
         """Remove well-known non versioned files"""
         # Remove venv
-        shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
+        shutil.rmtree(self.venv_path, ignore_errors=True)
         # Remove directories
         for path in find_dirs(
             self.gitignore,
