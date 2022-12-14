@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -340,12 +341,13 @@ class PyProject(
 
     @classmethod
     def find_current(
-        cls: Type[PyProjectT], start: Union[None, str, Path] = None
+        cls: Type[PyProjectT], start: Union[None, str, Path] = None, venv_path: str = None
     ) -> PyProjectT:
         """Find project from current directory by default"""
         projectfile = lookup_file("pyproject.toml", start=start)
         if projectfile:
-            return cls(projectfile)
+            venv_path = os.environ["VIRTUAL_ENV"]
+            return cls(projectfile, venv_path=venv_path)
         raise PyprojectNotFoundError(
             "Cannot find any pyproject.toml file in current directory or parent directories."
         )

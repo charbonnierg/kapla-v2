@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import os
 from pathlib import Path
 from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
 
@@ -140,10 +141,9 @@ class BasePythonProject(BaseProject[SpecT]):
 
     _python_executable: Path
 
-    @property
-    def venv_path(self) -> Path:
-        """Return path to virtualenv root directory"""
-        return self.root / ".venv"
+    def __init__(self, filepath: Union[str, Path], venv_path: str = None):
+        super().__init__(filepath)
+        self.venv_path = Path(venv_path) if venv_path else self.root / ".venv"
 
     @property
     def venv_bin(self) -> Path:
@@ -386,3 +386,5 @@ class BasePythonProject(BaseProject[SpecT]):
         for path in broken_paths:
             logger.warning(f"Removing broken install: {path.resolve(True).as_posix()}")
             shutil.rmtree(path, ignore_errors=True)
+
+
