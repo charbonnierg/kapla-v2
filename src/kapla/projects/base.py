@@ -141,7 +141,7 @@ class BasePythonProject(BaseProject[SpecT]):
 
     _python_executable: Path
 
-    def __init__(self, filepath: Union[str, Path], venv_path: str = None):
+    def __init__(self, filepath: Union[str, Path], venv_path: Optional[str] = None):
         super().__init__(filepath)
         self.venv_path = Path(venv_path) if venv_path else self.root / ".venv"
 
