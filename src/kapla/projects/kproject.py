@@ -66,7 +66,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         filepath: Union[str, Path],
         repo: Optional[KRepo] = None,
         workspace: Optional[str] = None,
-        venv_path: Optional[str] = None
+        venv_path: Union[str, Path, None] = None
     ) -> None:
         super().__init__(filepath, venv_path=repo.venv_path if repo else venv_path)
         self.repo = repo
