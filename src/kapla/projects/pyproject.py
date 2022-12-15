@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -345,7 +346,8 @@ class PyProject(
         """Find project from current directory by default"""
         projectfile = lookup_file("pyproject.toml", start=start)
         if projectfile:
-            return cls(projectfile)
+            venv_path = os.environ.get("VIRTUAL_ENV", None)
+            return cls(projectfile, venv_path=venv_path)
         raise PyprojectNotFoundError(
             "Cannot find any pyproject.toml file in current directory or parent directories."
         )
@@ -366,17 +368,11 @@ class KPyProject(PyProject):
         filepath: Union[str, Path],
         repo: Optional[KRepo] = None,
         workspace: Optional[str] = None,
+        venv_path: Optional[str] = None
     ) -> None:
-        super().__init__(filepath)
+        super().__init__(filepath, venv_path=repo.venv_path if repo else venv_path)
         self.repo = repo
         self.workspace = workspace
-
-    @property
-    def venv_path(self) -> Path:
-        """Get path to virtual environment of the project"""
-        if self.repo:
-            return self.repo.venv_path
-        return super().venv_path
 
     @property
     def gitignore(self) -> List[str]:

@@ -66,19 +66,13 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         filepath: Union[str, Path],
         repo: Optional[KRepo] = None,
         workspace: Optional[str] = None,
+        venv_path: Optional[str] = None
     ) -> None:
-        super().__init__(filepath)
+        super().__init__(filepath, venv_path=repo.venv_path if repo else venv_path)
         self.repo = repo
         self.workspace = workspace
         if self.spec.version is None and self.repo is not None:
             self.spec.version = self.repo.version
-
-    @property
-    def venv_path(self) -> Path:
-        """Get path to virtual environment of the project"""
-        if self.repo:
-            return self.repo.venv_path
-        return super().venv_path
 
     @property
     def gitignore(self) -> List[str]:
@@ -777,7 +771,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     def clean(self) -> None:
         """Remove well-known non versioned files"""
         # Remove venv
-        shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
+        shutil.rmtree(self.venv_path, ignore_errors=True)
         # Remove directories
         for path in find_dirs(
             self.gitignore,

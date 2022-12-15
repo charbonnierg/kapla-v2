@@ -54,8 +54,8 @@ class BaseKRepo(PyProject, spec=KRepoSpec):
 
 
 class KRepo(BaseKRepo):
-    def __init__(self, filepath: Union[str, Path]) -> None:
-        super().__init__(filepath)
+    def __init__(self, filepath: Union[str, Path], venv_path: Optional[str] = None) -> None:
+        super().__init__(filepath, venv_path=venv_path)
         self._workspaces = self.spec.tool.repo.workspaces or {"default": ["./"]}
         self._projects = {project.name: project for project in self.discover_projects()}
         self._projects_local_dependencies = self.get_projects_local_dependencies()
@@ -112,7 +112,7 @@ class KRepo(BaseKRepo):
         """Find project from current directory by default, and iterate recursively on parent directotries"""
         projectfile = lookup_file(("project.yml", "project.yaml"), start=Path.cwd())
         if projectfile:
-            return KProject(projectfile, repo=self)
+            return KProject(projectfile, repo=self, venv_path=self.venv_path)
         raise KProjectNotFoundError(
             "Cannot find any project.yml or project.yaml file in current directory or parent directories."
         )
@@ -644,7 +644,7 @@ class KRepo(BaseKRepo):
         ]
         # Remove venv
         if remove_venv:
-            shutil.rmtree(Path(self.root, ".venv"), ignore_errors=True)
+            shutil.rmtree(self.venv_path, ignore_errors=True)
         # clean monorepo
         for path in find_dirs(to_remove, self.root):
             shutil.rmtree(path, ignore_errors=True)

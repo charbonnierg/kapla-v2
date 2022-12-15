@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+
 from pathlib import Path
 from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
 
@@ -140,10 +141,9 @@ class BasePythonProject(BaseProject[SpecT]):
 
     _python_executable: Path
 
-    @property
-    def venv_path(self) -> Path:
-        """Return path to virtualenv root directory"""
-        return self.root / ".venv"
+    def __init__(self, filepath: Union[str, Path], venv_path: Optional[str] = None):
+        super().__init__(filepath)
+        self.venv_path = Path(venv_path) if venv_path else self.root / ".venv"
 
     @property
     def venv_bin(self) -> Path:
