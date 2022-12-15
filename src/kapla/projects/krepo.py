@@ -54,8 +54,8 @@ class BaseKRepo(PyProject, spec=KRepoSpec):
 
 
 class KRepo(BaseKRepo):
-    def __init__(self, filepath: Union[str, Path]) -> None:
-        super().__init__(filepath)
+    def __init__(self, filepath: Union[str, Path], venv_path: Optional[str] = None) -> None:
+        super().__init__(filepath, venv_path=venv_path)
         self._workspaces = self.spec.tool.repo.workspaces or {"default": ["./"]}
         self._projects = {project.name: project for project in self.discover_projects()}
         self._projects_local_dependencies = self.get_projects_local_dependencies()
