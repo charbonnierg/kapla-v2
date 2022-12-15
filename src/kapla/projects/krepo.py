@@ -112,7 +112,7 @@ class KRepo(BaseKRepo):
         """Find project from current directory by default, and iterate recursively on parent directotries"""
         projectfile = lookup_file(("project.yml", "project.yaml"), start=Path.cwd())
         if projectfile:
-            return KProject(projectfile, repo=self)
+            return KProject(projectfile, repo=self, venv_path=self.venv_path)
         raise KProjectNotFoundError(
             "Cannot find any project.yml or project.yaml file in current directory or parent directories."
         )

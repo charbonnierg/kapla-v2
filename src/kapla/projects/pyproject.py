@@ -345,7 +345,6 @@ class PyProject(
     ) -> PyProjectT:
         """Find project from current directory by default"""
         projectfile = lookup_file("pyproject.toml", start=start)
-        print ( "heeeeere")
         if projectfile:
             venv_path = os.environ.get("VIRTUAL_ENV", None)
             return cls(projectfile, venv_path=venv_path)
@@ -371,7 +370,7 @@ class KPyProject(PyProject):
         workspace: Optional[str] = None,
         venv_path: Optional[str] = None
     ) -> None:
-        super().__init__(filepath, venv_path=venv_path)
+        super().__init__(filepath, venv_path=repo.venv_path if repo else venv_path)
         self.repo = repo
         self.workspace = workspace
 
