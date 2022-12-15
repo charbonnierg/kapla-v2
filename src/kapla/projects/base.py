@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
-import os
+
 from pathlib import Path
 from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
 
@@ -386,5 +386,3 @@ class BasePythonProject(BaseProject[SpecT]):
         for path in broken_paths:
             logger.warning(f"Removing broken install: {path.resolve(True).as_posix()}")
             shutil.rmtree(path, ignore_errors=True)
-
-
