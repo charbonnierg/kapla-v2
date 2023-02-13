@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import shutil
 import sys
-
 from pathlib import Path
 from typing import Any, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
 
@@ -141,7 +140,9 @@ class BasePythonProject(BaseProject[SpecT]):
 
     _python_executable: Path
 
-    def __init__(self, filepath: Union[str, Path], venv_path: Union[str, Path, None] = None):
+    def __init__(
+        self, filepath: Union[str, Path], venv_path: Union[str, Path, None] = None
+    ):
         super().__init__(filepath)
         self.venv_path = Path(venv_path) if venv_path else self.root / ".venv"
 
