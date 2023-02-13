@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kapla-cli-v2"
 authors = [
-    { author = "Guillaume Charbonnier", email = "guillaume.charbonnier@araymond.com" },
+    { name = "Guillaume Charbonnier", email = "guillaume.charbonnier@araymond.com" },
 ]
 description = "Python monorepo package manager"
 readme = "README.md"
