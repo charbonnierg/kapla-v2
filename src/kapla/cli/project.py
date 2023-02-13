@@ -92,6 +92,7 @@ def set_docker_parser(parser: ArgumentParser) -> None:
     parser.add_argument("--no-build-dist", action="store_true", default=False)
     parser.add_argument("--build-arg", nargs="+", action="append", dest="build_arg")
     parser.add_argument("--platform", nargs="+", action="append", dest="platform")
+    parser.add_argument("--provenance", action="store_true", default=False)
     parser.add_argument(
         "--lock",
         "-l",
@@ -142,6 +143,7 @@ def do_build_docker(args: Any) -> None:
     platforms: List[List[str]] = args.platform
     lock_versions: bool = args.lock
     suffix: Optional[str] = args.suffix
+    provenance: bool = args.provenance
 
     if show_tag:
 
@@ -173,6 +175,7 @@ def do_build_docker(args: Any) -> None:
         push=push,
         build_args=parsed_build_args,
         platforms=parsed_platforms,
+        provenance=provenance,
         output_dir=output_dir,
         build_dist=False if no_build_dist else True,
         lock_versions=lock_versions,

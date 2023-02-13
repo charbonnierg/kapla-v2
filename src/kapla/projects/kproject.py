@@ -66,7 +66,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         filepath: Union[str, Path],
         repo: Optional[KRepo] = None,
         workspace: Optional[str] = None,
-        venv_path: Union[str, Path, None] = None
+        venv_path: Union[str, Path, None] = None,
     ) -> None:
         super().__init__(filepath, venv_path=repo.venv_path if repo else venv_path)
         self.repo = repo
@@ -641,6 +641,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         push: bool = False,
         build_args: Optional[Dict[str, str]] = None,
         platforms: Optional[List[str]] = None,
+        provenance: bool = False,
         suffix: Optional[str] = None,
         output_dir: Union[str, Path, None] = None,
         build_dist: bool = True,
@@ -739,6 +740,9 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 platform = spec.platforms
             if platform:
                 cmd.add_repeat_option("--platform", platform)
+            # Only add option when set to False, because defaut behaviour is to add provenance on latest buildx versions
+            if provenance is False:
+                cmd.add_option("--provenance", "false")
             cmd.add_argument(
                 Path(self.root, spec.context).resolve(True).as_posix()
                 if spec.context
