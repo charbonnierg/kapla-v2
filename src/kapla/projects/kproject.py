@@ -311,7 +311,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             group=groups,
         )
         # Generate pyproject file
-        return PyProjectSpec(tool={"poetry": poetry_config}, build_system=build_system)
+        return PyProjectSpec(tool={"poetry": poetry_config}, build_system=build_system)  # type: ignore[call-arg]
 
     def write_pyproject(
         self,

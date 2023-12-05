@@ -321,13 +321,11 @@ class KRepo(BaseKRepo):
     def get_projects_dependencies_missing(
         self,
     ) -> Tuple[Dict[str, Dict[str, Dependency]], Dict[str, List[str]]]:
-
         missing_deps: Dict[str, Dict[str, Dependency]] = defaultdict(dict)
         # Used like a set
         zombie_deps: Dict[str, Dict[str, None]] = defaultdict(dict)
 
         for project_name in self.projects:
-
             deps_summary = self.get_single_project_dependencies(project_name)
 
             # Iterate over groups
@@ -362,7 +360,6 @@ class KRepo(BaseKRepo):
                         zombie_deps[repo_group_name][dep] = None
 
             for dep, dep_spec in deps_summary.dependencies.items():
-
                 if dep in self.projects:
                     continue
 

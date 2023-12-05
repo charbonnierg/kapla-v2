@@ -110,7 +110,6 @@ def find_files(
     pattern_re, ignore_re = get_patterns(pattern, ignore)
 
     for current_dir, child_dirs, current_files in os.walk(root):
-
         current_path = root / current_dir
 
         if check_exclude(current_path, ignore_re):
@@ -162,7 +161,6 @@ def find_dirs(
     pattern_re, ignore_re = get_patterns(pattern, ignore)
 
     for current_dir, child_dirs, current_files in os.walk(root):
-
         current_path = root / current_dir
 
         if check_exclude(current_path, ignore_re):
@@ -170,7 +168,6 @@ def find_dirs(
             continue
 
         for dirname in child_dirs:
-
             if check_exclude(current_path / dirname, ignore_re):
                 continue
 

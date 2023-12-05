@@ -80,8 +80,8 @@ class PyProjectSpec(BasePyProjectSpec):
     tool: PyProjectTooling
 
 
-DEFAULT_BUILD_SYSTEM = BuildSystem(
-    build_backend="poetry.core.masonry.api",
+DEFAULT_BUILD_SYSTEM = BuildSystem(  # type: ignore[call-arg]
+    build_system="poetry.core.masonry.api",
     requires=[
         "poetry-core>=1.2.0",
     ],

@@ -72,7 +72,6 @@ def app() -> None:
             do_ensure_venv(args)
 
     elif args.command == "project":
-
         if args.action == "write":
             do_write_project(args)
 

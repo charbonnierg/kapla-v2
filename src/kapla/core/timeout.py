@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
 
-from anyio._core._eventloop import get_asynclib
-
-
-def get_event_loop_time() -> float:
-    """Get current event loop time. Do not use as timestamp !"""
-    return get_asynclib().current_time()  # type: ignore[no-any-return]
+from anyio import current_time
 
 
 def get_deadline(
@@ -25,11 +19,7 @@ def get_deadline(
         A float representing event loop time at which point timeout is reached
     """
     return (
-        deadline
-        if deadline
-        else asyncio.get_event_loop().time() + timeout
-        if timeout
-        else float("inf")
+        deadline if deadline else current_time() + timeout if timeout else float("inf")
     )
 
 
@@ -47,14 +37,10 @@ def get_timeout(
         A float representing number of seconds to wait before timeout is reached
     """
     return (
-        timeout
-        if timeout
-        else deadline - asyncio.get_event_loop().time()
-        if deadline
-        else float("inf")
+        timeout if timeout else deadline - current_time() if deadline else float("inf")
     )
 
 
 def check_deadline(value: float) -> bool:
     """Check if deadline is still valid"""
-    return value > get_event_loop_time()
+    return value > current_time()

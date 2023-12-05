@@ -137,7 +137,6 @@ class BaseProject(Generic[SpecT]):
 
 
 class BasePythonProject(BaseProject[SpecT]):
-
     _python_executable: Path
 
     def __init__(

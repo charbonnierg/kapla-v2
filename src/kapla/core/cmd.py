@@ -29,7 +29,7 @@ from anyio.abc import Process
 from anyio.streams.buffered import BufferedByteReceiveStream
 
 from .errors import CommandFailedError, CommandNotFoundError
-from .timeout import get_deadline, get_event_loop_time, get_timeout
+from .timeout import current_time, get_deadline, get_timeout
 from .windows import IS_WINDOWS
 
 STDOUT_SINK = partial(print, end="", sep="", file=sys.stdout)
@@ -243,7 +243,7 @@ class Command:
 
     async def fire(self) -> Command:
         """Start the command"""
-        if self.deadline < get_event_loop_time():
+        if self.deadline < current_time():
             raise
         # It is needed to ensure that we will properly enter and exit nested context managers
         self._exitstack = AsyncExitStack()
