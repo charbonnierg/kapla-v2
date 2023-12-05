@@ -359,7 +359,7 @@ class Command:
                 try:
                     text = chunk.decode(default_encoding)
                 except UnicodeDecodeError:
-                    default_encoding = chardet.detect(chunk)["encoding"]  # type: ignore[assignment]
+                    default_encoding = chardet.detect(chunk)["encoding"]
                     text = chunk.decode(default_encoding)
                 self._stderr_read += text
                 if iscoroutinefunction(self._stderr_sink):
@@ -375,7 +375,7 @@ class Command:
                 try:
                     text = chunk.decode(default_encoding)
                 except UnicodeDecodeError:
-                    default_encoding = chardet.detect(chunk)["encoding"]  # type: ignore[assignment]
+                    default_encoding = chardet.detect(chunk)["encoding"]
                     text = chunk.decode(default_encoding)
                 self._stdout_read += text
                 if iscoroutinefunction(self._stdout_sink):
