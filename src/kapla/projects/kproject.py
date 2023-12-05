@@ -306,12 +306,14 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         # Generate poetry config by merging raw config and gather dependencies, extras and group
         poetry_config = PoetryConfig(
             **raw_poetry_config,
-            dependencies=dependencies,
+            dependencies=dependencies,  # pyright: ignore
             extras=extras,
             group=groups,
         )
         # Generate pyproject file
-        return PyProjectSpec(tool={"poetry": poetry_config}, build_system=build_system)  # type: ignore[call-arg]
+        return PyProjectSpec(
+            tool={"poetry": poetry_config}, build_system=build_system  # pyright: ignore
+        )
 
     def write_pyproject(
         self,

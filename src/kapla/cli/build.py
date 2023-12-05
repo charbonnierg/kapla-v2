@@ -47,8 +47,8 @@ def do_build(args: Any) -> None:
     # Define function to perform build
     build = partial(
         repo.build_projects,
-        include_projects=include_projects,
-        exclude_projects=exclude_projects,
+        include_projects=list(include_projects) if include_projects else [],
+        exclude_projects=list(exclude_projects) if exclude_projects else [],
         lock_versions=lock_versions,
         clean=clean,
     )

@@ -32,7 +32,7 @@ class BaseProject(Generic[SpecT]):
         if spec:
             # Store spec parameter into __SPEC__ attribute of child class
             # This attribute will be available to all instances of child classes
-            cls.__SPEC__ = spec
+            cls.__SPEC__ = spec  # pyright: ignore
 
     def __init__(self, filepath: Union[str, Path]):
         """Create a new instance of BaseProject.

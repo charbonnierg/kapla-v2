@@ -309,6 +309,8 @@ class KRepo(BaseKRepo):
                 if name.startswith(project.name + "--")
             }
             python_version = project_python or repo_python
+            if not python_version:
+                raise RuntimeError("A python version must be specified")
             dependencies[project.name] = ProjectDependencies(
                 repo_dependencies=repo_deps,
                 repo_groups=repo_groups,
@@ -441,10 +443,6 @@ class KRepo(BaseKRepo):
                 await self.poetry_add(
                     *packages,
                     group=group,
-                    editable=True if dep.develop else False,
-                    extras=dep.extras,
-                    optional=True if dep.optional else False,
-                    python=dep.python,
                     lock=True,
                 )
 

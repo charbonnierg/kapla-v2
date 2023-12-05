@@ -13,7 +13,7 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class AliasedModel(BaseModel):
-    def dict(
+    def dict(  # type: ignore[override]
         self,
         *,
         include: Union[AbstractSetIntStr, MappingIntStrAny, None] = None,
@@ -107,4 +107,5 @@ class AliasedModel(BaseModel):
 
     class Config:
         allow_population_by_field_name = True
+        populate_by_name = True
         extra = "forbid"

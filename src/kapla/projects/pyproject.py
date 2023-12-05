@@ -16,6 +16,7 @@ from typing import (
 )
 
 import tomlkit
+import tomlkit.items
 
 from kapla.specs.pyproject import Dependency, PyProjectSpec
 from kapla.wrappers import poetry

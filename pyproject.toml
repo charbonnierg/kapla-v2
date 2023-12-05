@@ -19,7 +19,7 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "graphlib-backport ; python_version < '3.9'",
-    "pydantic",
+    "pydantic<2",
     "anyio",
     "ruamel.yaml",
     "tomlkit",
@@ -51,3 +51,14 @@ k = "kapla.cli:app"
 
 [tool.setuptools.dynamic]
 version = { attr = "kapla.__version__" }
+
+
+[tool.pyright]
+
+pythonVersion = "3.9"
+include = ["tests", "src"]
+exclude = ["**/.venv", "**/node_modules", "**/__pycache__", ".git", "**/build"]
+venv = ".venv"
+venvPath = "."
+typeCheckingMode = "basic"
+reportUnnecessaryTypeIgnoreComment = "warning"

@@ -359,7 +359,7 @@ class Command:
                 try:
                     text = chunk.decode(default_encoding)
                 except UnicodeDecodeError:
-                    default_encoding = chardet.detect(chunk)["encoding"]
+                    default_encoding = chardet.detect(chunk)["encoding"]  # type: ignore[assignment]
                     text = chunk.decode(default_encoding)
                 self._stderr_read += text
                 if iscoroutinefunction(self._stderr_sink):
@@ -375,7 +375,7 @@ class Command:
                 try:
                     text = chunk.decode(default_encoding)
                 except UnicodeDecodeError:
-                    default_encoding = chardet.detect(chunk)["encoding"]
+                    default_encoding = chardet.detect(chunk)["encoding"]  # type: ignore[assignment]
                     text = chunk.decode(default_encoding)
                 self._stdout_read += text
                 if iscoroutinefunction(self._stdout_sink):
@@ -503,9 +503,12 @@ class Command:
         escape: bool = True,
     ) -> None:
         """Add a key value option such as --build-arg=KEY=VALUE"""
+        all_options: Iterable[Mapping[str, str]] = []
         if isinstance(options, dict):
-            options = [options]
-        for _options in options:
+            all_options.append(options)  # type: ignore
+        else:
+            all_options = options
+        for _options in all_options:
             self.add_kv_option(
                 flag, _options, sep=sep, eq=eq, inner_eq=inner_eq, escape=escape
             )

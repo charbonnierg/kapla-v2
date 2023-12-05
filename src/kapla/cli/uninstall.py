@@ -47,8 +47,8 @@ def do_uninstall(args: Any) -> None:
     # Define function to perform install
     uninstall = partial(
         repo.uninstall_editable_projects,
-        include_projects=include_projects,
-        exclude_projects=exclude_projects,
+        include_projects=list(include_projects) if include_projects else [],
+        exclude_projects=list(exclude_projects) if exclude_projects else [],
         pip_quiet=quiet,
     )
     # Run install

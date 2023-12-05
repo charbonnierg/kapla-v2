@@ -110,8 +110,8 @@ def do_install(args: Any) -> None:
     # Define function to perform install
     install = partial(
         repo.install_editable_projects,
-        include_projects=include_projects,
-        exclude_projects=exclude_projects,
+        include_projects=list(include_projects) if include_projects else [],
+        exclude_projects=list(exclude_projects) if exclude_projects else [],
         exclude_groups=exclude_groups,
         include_groups=include_groups,
         only_groups=only_groups,

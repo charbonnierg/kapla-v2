@@ -18,7 +18,7 @@ class DepedencyMeta(AliasedModel):
     extras: Optional[List[str]] = None
     python: Optional[str] = None
     markers: Optional[str] = None
-    allow_prereleases: Optional[bool] = Field(None, alias="allow-prereleases")
+    allow_prereleases: Optional[bool] = Field(default=None, alias="allow-prereleases")
 
 
 class Dependency(DepedencyMeta):
@@ -81,7 +81,7 @@ class PyProjectSpec(BasePyProjectSpec):
 
 
 DEFAULT_BUILD_SYSTEM = BuildSystem(
-    build_backend="poetry.core.masonry.api",  # type: ignore[call-arg]
+    build_backend="poetry.core.masonry.api",  # pyright: ignore[reportGeneralTypeIssues]
     requires=[
         "poetry-core>=1.2.0",
     ],

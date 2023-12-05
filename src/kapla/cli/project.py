@@ -11,6 +11,7 @@ from anyio import run
 from kapla.core.errors import CommandFailedError
 from kapla.core.logger import logger
 from kapla.projects.krepo import KRepo
+from kapla.specs.common import Package
 from kapla.specs.kproject import KProjectSpec
 
 
@@ -345,7 +346,7 @@ def do_create_new_project(args: Any) -> None:
     project_path = project_root / "project.yml"
 
     project_spec = KProjectSpec(  # noqa: F841
-        name=project_name, version=version, packages=[{"include": "quara"}]
+        name=project_name, version=version, packages=[Package(include="quara")]
     )
     # FIXME: Write project file
     project_path.touch()
