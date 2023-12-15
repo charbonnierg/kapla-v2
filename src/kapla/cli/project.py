@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from argparse import ArgumentParser, _SubParsersAction
 from functools import partial
@@ -88,6 +89,12 @@ def set_docker_parser(parser: ArgumentParser) -> None:
     parser.add_argument(
         "--tag", nargs="+", action="append", dest="tags", required=False, default=None
     )
+    parser.add_argument(
+        "--tags-file",
+        required=False,
+        default=None,
+        help="Path to file containing tags as a JSON array",
+    )
     parser.add_argument("--suffix", required=False, default=None)
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--push", action="store_true", default=False)
@@ -138,6 +145,7 @@ def set_project_parser(
 def do_build_docker(args: Any) -> None:
     show_tag: bool = args.show_tag
     tags: Optional[List[str]] = args.tags
+    tags_file: Optional[str] = args.tags_file
     load: bool = args.load
     push: bool = args.push
     output_dir: Optional[str] = args.output_dir
@@ -159,6 +167,10 @@ def do_build_docker(args: Any) -> None:
         run(main)
         sys.exit(0)
 
+    if tags_file and tags and any(_tags for _tags in tags):
+        logger.error("You cannot use both --tags-file and --tag")
+        sys.exit(1)
+
     parsed_build_args: Dict[str, str] = {}
     for build_arg in build_args or []:
         key, value = build_arg[0].split("=")
@@ -175,6 +187,12 @@ def do_build_docker(args: Any) -> None:
     if tags and any(_tags for _tags in tags):
         tags = [elem for _tags in tags for elem in _tags]
         tag, *additional_tags = tags
+    elif tags_file:
+        tags_filepath = Path(tags_file).expanduser().resolve()
+        if not tags_filepath.exists():
+            logger.error(f"Tags file {tags_filepath} does not exist")
+            sys.exit(1)
+        tag, *additional_tags = json.loads(tags_filepath.read_text())
     docker_func = partial(
         project.build_docker,
         tag=tag,
