@@ -85,7 +85,9 @@ def set_add_parser(parser: ArgumentParser) -> None:
 
 def set_docker_parser(parser: ArgumentParser) -> None:
     parser.add_argument("--show-tag", action="store_true", default=None)
-    parser.add_argument("--tag", required=False, default=None)
+    parser.add_argument(
+        "--tag", nargs="+", action="append", dest="tags", required=False, default=None
+    )
     parser.add_argument("--suffix", required=False, default=None)
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--push", action="store_true", default=False)
@@ -135,7 +137,7 @@ def set_project_parser(
 
 def do_build_docker(args: Any) -> None:
     show_tag: bool = args.show_tag
-    tag: Optional[str] = args.tag
+    tags: Optional[List[str]] = args.tags
     load: bool = args.load
     push: bool = args.push
     output_dir: Optional[str] = args.output_dir
@@ -168,9 +170,14 @@ def do_build_docker(args: Any) -> None:
 
     repo = KRepo.find_current()
     project = repo.find_current_project()
+    tag: Optional[str] = None
+    additional_tags: Optional[List[str]] = None
+    if tags:
+        tag, *additional_tags = tags
     docker_func = partial(
         project.build_docker,
         tag=tag,
+        additional_tags=additional_tags,
         suffix=suffix,
         load=load,
         push=push,

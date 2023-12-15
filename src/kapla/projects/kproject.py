@@ -639,6 +639,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
     async def build_docker(
         self,
         tag: Optional[str] = None,
+        additional_tags: Optional[Iterable[str]] = None,
         load: bool = False,
         push: bool = False,
         build_args: Optional[Dict[str, str]] = None,
@@ -719,6 +720,8 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
                 cmd.add_option("--label", f"git.commit={git_infos.commit}")
             # Add tag
             cmd.add_option("--tag", ":".join([spec.image + suffix, tag]))
+            for tag in additional_tags or []:
+                cmd.add_option("--tag", ":".join([spec.image + suffix, tag]))
             if load:
                 cmd.add_option("--load")
             if push:
