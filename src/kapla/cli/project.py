@@ -172,7 +172,8 @@ def do_build_docker(args: Any) -> None:
     project = repo.find_current_project()
     tag: Optional[str] = None
     additional_tags: Optional[List[str]] = None
-    if tags:
+    if tags and any(_tags for _tags in tags):
+        tags = [elem for _tags in tags for elem in _tags]
         tag, *additional_tags = tags
     docker_func = partial(
         project.build_docker,
