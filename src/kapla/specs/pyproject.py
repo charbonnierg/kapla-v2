@@ -69,9 +69,6 @@ class PoetryConfig(BasePythonConfig):
     # Docs: <https://python-poetry.org/docs/master/managing-dependencies/#dependency-groups>
     group: Dict[str, Group] = {}
 
-    class Config(AliasedModel.Config):
-        extra = "allow"
-
 
 class PyProjectTooling(AliasedModel):
     """[tool.*] sections of a pyproject.toml file"""

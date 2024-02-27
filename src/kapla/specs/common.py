@@ -66,3 +66,6 @@ class BasePythonConfig(AliasedModel):
     plugins: Dict[str, Dict[str, str]] = {}
     # Docs: <https://python-poetry.org/docs/pyproject/#urls>
     urls: Dict[str, str] = {}
+
+    class Config(AliasedModel.Config):
+        extra = "allow"
