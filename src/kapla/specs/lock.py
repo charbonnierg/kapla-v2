@@ -11,6 +11,9 @@ class LockedFile(AliasedModel):
     file: str
     file_hash: str = Field(alias="hash")
 
+    class Config(AliasedModel.Config):
+        extra = "allow"
+
 
 class LockedPackage(AliasedModel):
     name: str
@@ -39,3 +42,6 @@ class LockedMetadata(AliasedModel):
 class LockFile(AliasedModel):
     packages: Dict[str, LockedPackage]
     metadata: Optional[LockedMetadata] = None
+
+    class Config(AliasedModel.Config):
+        extra = "allow"

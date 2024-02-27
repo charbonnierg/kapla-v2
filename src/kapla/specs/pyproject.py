@@ -20,6 +20,9 @@ class DepedencyMeta(AliasedModel):
     markers: Optional[str] = None
     allow_prereleases: Optional[bool] = Field(default=None, alias="allow-prereleases")
 
+    class Config(AliasedModel.Config):
+        extra = "allow"
+
 
 class Dependency(DepedencyMeta):
     """A dependency found in a pyproject.toml file.
@@ -36,10 +39,16 @@ class Dependency(DepedencyMeta):
 
     version: Optional[str] = None
 
+    class Config(AliasedModel.Config):
+        extra = "allow"
+
 
 class Group(AliasedModel):
     dependencies: Dict[str, Union[Dependency, str]] = {}
     optional: Optional[bool] = None
+
+    class Config(AliasedModel.Config):
+        extra = "allow"
 
 
 class PoetryConfig(BasePythonConfig):
@@ -60,6 +69,9 @@ class PoetryConfig(BasePythonConfig):
     # Docs: <https://python-poetry.org/docs/master/managing-dependencies/#dependency-groups>
     group: Dict[str, Group] = {}
 
+    class Config(AliasedModel.Config):
+        extra = "allow"
+
 
 class PyProjectTooling(AliasedModel):
     """[tool.*] sections of a pyproject.toml file"""
@@ -78,6 +90,9 @@ class PyProjectSpec(BasePyProjectSpec):
     """Complete pyproject.toml file"""
 
     tool: PyProjectTooling
+
+    class Config(AliasedModel.Config):
+        extra = "allow"
 
 
 DEFAULT_BUILD_SYSTEM = BuildSystem(
