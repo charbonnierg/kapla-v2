@@ -462,8 +462,12 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         target = self.root.as_posix()
         if groups:
             target += f'[{",".join(groups)}]'
+        cmd = ["-e", target]
+        if not build_isolation:
+            cmd.append("--no-build-isolation")
+        cmd.append("--no-deps")
         logger.debug(
-            f"Installing {self.name}",
+            f"Installing {self.name} with command: {cmd}",
             version=self.version,
             package=target,
         )
@@ -473,10 +477,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             lock_versions=lock_versions,
             build_system=build_system,
         ):
-            cmd = ["-e", target]
-            if not build_isolation:
-                cmd.append("--no-build-isolation")
-            cmd.append("--no-deps")
+
             return await self.repo.pip_install(
                 *cmd,
                 quiet=quiet,
