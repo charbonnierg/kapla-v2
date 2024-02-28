@@ -332,10 +332,10 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         content = spec.dict()
         # Create an inline table to have more readable pyprojects
         if spec.tool.poetry.dependencies:
-            content["tool"]["poetry"][
-                "dependencies"
-            ] = KPyProject._create_inline_tables(
-                content["tool"]["poetry"]["dependencies"]
+            content["tool"]["poetry"]["dependencies"] = (
+                KPyProject._create_inline_tables(
+                    content["tool"]["poetry"]["dependencies"]
+                )
             )
         # Ensure python dependency is a string
         if "python" in content["tool"]["poetry"]["dependencies"]:
@@ -462,8 +462,12 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
         target = self.root.as_posix()
         if groups:
             target += f'[{",".join(groups)}]'
+        cmd = ["-e", target]
+        if not build_isolation:
+            cmd.append("--no-build-isolation")
+        cmd.append("--no-deps")
         logger.debug(
-            f"Installing {self.name}",
+            f"Installing {self.name} with command: {cmd}",
             version=self.version,
             package=target,
         )
@@ -473,9 +477,7 @@ class KProject(ReadWriteYAMLMixin, BasePythonProject[KProjectSpec], spec=KProjec
             lock_versions=lock_versions,
             build_system=build_system,
         ):
-            cmd = ["-e", target]
-            if not build_isolation:
-                cmd.append("--no-build-isolation")
+
             return await self.repo.pip_install(
                 *cmd,
                 quiet=quiet,
